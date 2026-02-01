@@ -1,0 +1,17 @@
+{
+  "name": "memfw-skill",
+  "version": "0.1.0",
+  "description": "Memory Firewall skill for OpenClaw",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "memfw": "file:.."
+  },
+  "peerDependencies": {
+    "openclaw": ">=0.1.0"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "detection": {
+    "enabled": true,
+    "useLlmJudge": false,
+    "sensitivity": "medium",
+    "embeddingProvider": "openai"
+  },
+  "trust": {
+    "moltbook": "external",
+    "web_fetch": "external",
+    "web_search": "external",
+    "email": "external",
+    "github": "tool_verified",
+    "gitlab": "tool_verified",
+    "slack": "tool_verified",
+    "notion": "tool_verified",
+    "jira": "tool_verified"
+  },
+  "notifications": {
+    "onQuarantine": true,
+    "channel": null
+  },
+  "storage": {
+    "dataDir": "./data"
+  }
+}
