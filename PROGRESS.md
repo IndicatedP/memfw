@@ -138,17 +138,53 @@ skill/
 
 ---
 
-## Phase 3: LLM Judge + Refinement 🔲 NOT STARTED
+## Phase 3: LLM Judge + Refinement ✅ COMPLETE
 
-### Planned Deliverables
+### Deliverables
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Layer 3 LLM judge | 🔲 Todo | For borderline cases |
-| Configurable thresholds | 🔲 Todo | User-adjustable sensitivity |
-| Better source heuristics | 🔲 Todo | Improved source detection |
-| Quarantine notifications | 🔲 Todo | Alert user on quarantine |
-| Web dashboard (optional) | 🔲 Todo | Audit/review UI |
+| Layer 3 LLM judge | ✅ Done | `src/core/judge.ts` - evaluates borderline cases |
+| Configurable thresholds | ✅ Done | Trust-adjusted thresholds, sensitivity presets |
+| Quarantine notifications | ✅ Done | `src/core/notifications.ts` - console, callback, webhook |
+| Updated CLI | ✅ Done | Shows Layer 3 verdict and reasoning |
+| Updated skill | ✅ Done | Layer 3 and notifications integration |
+| Web dashboard (optional) | 🔲 Todo | Not implemented - low priority |
+
+### Layer 3 LLM Judge
+
+The LLM Judge (`src/core/judge.ts`) evaluates borderline cases:
+
+- Uses GPT-4o-mini by default (configurable)
+- Comprehensive system prompt covering attack patterns
+- Returns SAFE, SUSPICIOUS, or DANGEROUS verdict
+- Includes confidence score and reasoning
+- Only triggered for borderline cases (efficient)
+
+**Trigger conditions:**
+- Layer 1 triggered but Layer 2 passed
+- Layer 2 similarity within 10% of threshold
+- Low-trust sources with any flags
+
+### Notification System
+
+The Notifier (`src/core/notifications.ts`) supports:
+
+- **Console:** Colored terminal output
+- **Callback:** Custom handler function
+- **Webhook:** HTTP POST to external URL
+- **Risk filtering:** Only notify above minimum level
+
+### Detection Flow
+
+```
+Content → Layer 1 (patterns) → Layer 2 (embeddings) → Layer 3 (LLM)
+              ↓                      ↓                     ↓
+          Fast check           Semantic match        Deep analysis
+           (~1ms)                (~50ms)              (~500ms)
+              ↓                      ↓                     ↓
+         PASS/INSPECT          PASS/FLAG            PASS/QUARANTINE
+```
 
 ---
 
@@ -186,7 +222,9 @@ memfw/
 │   │   ├── patterns.ts       # Layer 1 regex patterns
 │   │   ├── detector.ts       # Detection pipeline
 │   │   ├── exemplars.ts      # Layer 2 attack exemplars
-│   │   └── embeddings.ts     # OpenAI embedding client
+│   │   ├── embeddings.ts     # OpenAI embedding client
+│   │   ├── judge.ts          # Layer 3 LLM judge
+│   │   └── notifications.ts  # Quarantine notifications
 │   ├── storage/
 │   │   ├── provenance.ts     # Provenance metadata store
 │   │   ├── memory.ts         # Memory store with FTS
@@ -262,7 +300,7 @@ export OPENAI_API_KEY=your-key-here
 ## Next Steps
 
 1. **Testing:** Add unit tests for detection pipeline and skill
-2. **Phase 3:** Implement LLM Judge for borderline cases
+2. **Phase 4:** Add behavioral baseline and anomaly detection
 3. **Phase 4:** Add behavioral baseline and anomaly detection
 4. **Documentation:** Add API documentation
 5. **Publishing:** Publish to npm and OpenClaw skill registry

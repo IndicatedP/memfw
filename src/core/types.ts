@@ -55,6 +55,13 @@ export interface DetectionResult {
     similarity: number;
     matchedExemplar?: string;
   };
+  /** Layer 3 LLM judge results (only for borderline cases) */
+  layer3?: {
+    evaluated: boolean;
+    verdict?: 'SAFE' | 'SUSPICIOUS' | 'DANGEROUS';
+    confidence?: number;
+    reasoning?: string;
+  };
   /** Human-readable explanation */
   reason: string;
 }
@@ -82,6 +89,10 @@ export interface QuarantinedMemory {
   layer2Similarity: number;
   /** The exemplar that matched (if any) */
   layer2Exemplar?: string;
+  /** Layer 3 LLM verdict (if evaluated) */
+  layer3Verdict?: 'SAFE' | 'SUSPICIOUS' | 'DANGEROUS';
+  /** Layer 3 reasoning */
+  layer3Reasoning?: string;
   /** When the memory was quarantined */
   quarantinedAt: Date;
   /** Current status */
@@ -112,7 +123,7 @@ export interface Memory {
  * Configuration for memfw
  */
 export interface MemfwConfig {
-  /** OpenAI API key for embeddings */
+  /** OpenAI API key for embeddings and LLM judge */
   openaiApiKey: string;
   /** Path to SQLite database */
   dbPath?: string;
@@ -122,6 +133,10 @@ export interface MemfwConfig {
   trustThresholds?: Partial<Record<TrustLevel, number>>;
   /** Whether to enable Layer 2 semantic analysis */
   enableLayer2?: boolean;
+  /** Whether to enable Layer 3 LLM judge for borderline cases */
+  enableLayer3?: boolean;
+  /** Model to use for Layer 3 LLM judge (default: gpt-4o-mini) */
+  layer3Model?: string;
 }
 
 /**

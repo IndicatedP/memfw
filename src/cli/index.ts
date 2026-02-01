@@ -47,8 +47,14 @@ function formatDate(date: Date): string {
   return date.toISOString().replace('T', ' ').substring(0, 19);
 }
 
-// Helper to get risk level from similarity score
-function getRiskLevel(similarity: number): string {
+// Helper to get risk level from similarity score and optional Layer 3 verdict
+function getRiskLevel(similarity: number, layer3Verdict?: string): string {
+  // Layer 3 verdict takes precedence
+  if (layer3Verdict === 'DANGEROUS') return chalk.red('HIGH');
+  if (layer3Verdict === 'SUSPICIOUS') return chalk.yellow('MEDIUM');
+  if (layer3Verdict === 'SAFE') return chalk.green('LOW');
+
+  // Fall back to similarity score
   if (similarity >= 0.85) return chalk.red('HIGH');
   if (similarity >= 0.75) return chalk.yellow('MEDIUM');
   return chalk.blue('LOW');
@@ -184,7 +190,7 @@ quarantine
           memory.id.substring(0, 8),
           memory.source,
           truncate(memory.text, 37),
-          getRiskLevel(memory.layer2Similarity),
+          getRiskLevel(memory.layer2Similarity, memory.layer3Verdict),
           statusColors[memory.status](memory.status),
         ]);
       }
@@ -232,9 +238,21 @@ quarantine
       console.log();
 
       console.log(chalk.bold('Detection Results:'));
-      console.log(`  Layer 2 Similarity: ${chalk.yellow(memory.layer2Similarity.toFixed(3))} ${getRiskLevel(memory.layer2Similarity)}`);
+      console.log(`  Layer 2 Similarity: ${chalk.yellow(memory.layer2Similarity.toFixed(3))} ${getRiskLevel(memory.layer2Similarity, memory.layer3Verdict)}`);
       if (memory.layer1Flags.length > 0) {
         console.log(`  Layer 1 Flags: ${memory.layer1Flags.join(', ')}`);
+      }
+      if (memory.layer3Verdict) {
+        const verdictColors: Record<string, (s: string) => string> = {
+          SAFE: chalk.green,
+          SUSPICIOUS: chalk.yellow,
+          DANGEROUS: chalk.red,
+        };
+        const colorFn = verdictColors[memory.layer3Verdict] ?? chalk.white;
+        console.log(`  Layer 3 Verdict: ${colorFn(memory.layer3Verdict)}`);
+        if (memory.layer3Reasoning) {
+          console.log(`  Layer 3 Reasoning: ${memory.layer3Reasoning}`);
+        }
       }
       if (memory.layer2Exemplar) {
         console.log();

@@ -16,6 +16,8 @@ import {
   DetectionResult,
   QuarantinedMemory,
   MemoryProvenance,
+  Notifier,
+  createNotifier,
 } from 'memfw';
 import type { SkillContext, MemoryContext } from './index.js';
 
@@ -25,13 +27,15 @@ import type { SkillContext, MemoryContext } from './index.js';
 export interface SkillConfig {
   detection: {
     enabled: boolean;
-    useLlmJudge: boolean;
+    enableLayer3: boolean;
+    layer3Model: string;
     sensitivity: 'low' | 'medium' | 'high';
     embeddingProvider: 'local' | 'openai';
   };
   trust: Record<string, TrustLevel>;
   notifications: {
     onQuarantine: boolean;
+    minRiskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
     channel: string | null;
   };
   storage: {
@@ -85,10 +89,13 @@ export class MemfwSkill {
     // Initialize detector
     const openaiApiKey = process.env.OPENAI_API_KEY;
     const enableLayer2 = this.config.detection.enabled && !!openaiApiKey;
+    const enableLayer3 = this.config.detection.enableLayer3 && !!openaiApiKey;
 
     this.detector = new Detector({
       openaiApiKey,
       enableLayer2,
+      enableLayer3,
+      layer3Model: this.config.detection.layer3Model,
       similarityThreshold: this.getSensitivityThreshold(),
     });
 
@@ -96,11 +103,21 @@ export class MemfwSkill {
       await this.detector.initialize();
     }
 
+    // Initialize notifier
+    const notifier = this.config.notifications.onQuarantine
+      ? createNotifier({
+          enabled: true,
+          channels: ['console'],
+          minRiskLevel: this.config.notifications.minRiskLevel,
+        })
+      : undefined;
+
     // Initialize tagger
     this.tagger = new IngressTagger({
       detector: this.detector,
       provenanceStore: this.provenanceStore,
       quarantineStore: this.quarantineStore,
+      notifier,
     });
 
     this.initialized = true;
@@ -115,13 +132,15 @@ export class MemfwSkill {
     const defaultConfig: SkillConfig = {
       detection: {
         enabled: true,
-        useLlmJudge: false,
+        enableLayer3: false,
+        layer3Model: 'gpt-4o-mini',
         sensitivity: 'medium',
         embeddingProvider: 'openai',
       },
       trust: {},
       notifications: {
         onQuarantine: true,
+        minRiskLevel: 'LOW',
         channel: null,
       },
       storage: {
@@ -216,6 +235,7 @@ export class MemfwSkill {
   getStatus(): {
     enabled: boolean;
     layer2Enabled: boolean;
+    layer3Enabled: boolean;
     totalMemories: number;
     quarantineCounts: Record<string, number>;
     trustCounts: Record<string, number>;
@@ -227,6 +247,7 @@ export class MemfwSkill {
     return {
       enabled: this.config?.detection.enabled ?? false,
       layer2Enabled: this.detector.isLayer2Enabled(),
+      layer3Enabled: this.detector.isLayer3Enabled(),
       totalMemories: this.provenanceStore.getTotal(),
       quarantineCounts: this.quarantineStore.getCounts(),
       trustCounts: this.provenanceStore.getCountsByTrust(),
@@ -339,8 +360,8 @@ export class MemfwSkill {
         } else {
           return false;
         }
-      } else if (parts[1] === 'useLlmJudge') {
-        this.config.detection.useLlmJudge = value === true || value === 'true';
+      } else if (parts[1] === 'enableLayer3') {
+        this.config.detection.enableLayer3 = value === true || value === 'true';
       } else {
         return false;
       }

@@ -69,6 +69,7 @@ export class CommandHandler {
       '',
       `**Protection:** ${status.enabled ? 'Active' : 'Disabled'}`,
       `**Layer 2 (Semantic):** ${status.layer2Enabled ? 'Enabled' : 'Disabled'}`,
+      `**Layer 3 (LLM Judge):** ${status.layer3Enabled ? 'Enabled' : 'Disabled'}`,
       '',
       '### Memory Statistics',
       `- Protected memories: ${status.totalMemories}`,
@@ -152,12 +153,13 @@ export class CommandHandler {
 
         const lines = ['## Quarantined Memories', ''];
         for (const memory of memories) {
-          const riskLevel = this.getRiskLevel(memory.layer2Similarity);
+          const riskLevel = this.getRiskLevel(memory.layer2Similarity, memory.layer3Verdict);
           const preview = this.truncate(memory.text, 60);
           lines.push(
             `### ${memory.id.substring(0, 8)} [${memory.status.toUpperCase()}]`,
             `- **Source:** ${memory.source}`,
             `- **Risk:** ${riskLevel}`,
+            memory.layer3Verdict ? `- **LLM Verdict:** ${memory.layer3Verdict}` : '',
             `- **Content:** ${preview}`,
             ''
           );
@@ -195,6 +197,13 @@ export class CommandHandler {
 
         if (memory.layer1Flags.length > 0) {
           lines.push(`- Layer 1 Flags: ${memory.layer1Flags.join(', ')}`);
+        }
+
+        if (memory.layer3Verdict) {
+          lines.push(`- Layer 3 Verdict: **${memory.layer3Verdict}**`);
+          if (memory.layer3Reasoning) {
+            lines.push(`- Layer 3 Reasoning: ${memory.layer3Reasoning}`);
+          }
         }
 
         if (memory.layer2Exemplar) {
@@ -339,7 +348,7 @@ export class CommandHandler {
       '### Detection',
       `- enabled: ${config.detection.enabled}`,
       `- sensitivity: ${config.detection.sensitivity}`,
-      `- useLlmJudge: ${config.detection.useLlmJudge}`,
+      `- enableLayer3: ${config.detection.enableLayer3}`,
       '',
       '### Notifications',
       `- onQuarantine: ${config.notifications.onQuarantine}`,
@@ -361,7 +370,13 @@ export class CommandHandler {
   /**
    * Get risk level label
    */
-  private getRiskLevel(similarity: number): string {
+  private getRiskLevel(similarity: number, layer3Verdict?: string): string {
+    // Layer 3 verdict takes precedence
+    if (layer3Verdict === 'DANGEROUS') return 'HIGH';
+    if (layer3Verdict === 'SUSPICIOUS') return 'MEDIUM';
+    if (layer3Verdict === 'SAFE') return 'LOW';
+
+    // Fall back to similarity score
     if (similarity >= 0.85) return 'HIGH';
     if (similarity >= 0.75) return 'MEDIUM';
     return 'LOW';

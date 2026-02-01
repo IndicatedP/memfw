@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { TrustLevel, MemoryProvenance, DetectionResult } from '../core/types.js';
 import { Detector } from '../core/detector.js';
+import { Notifier } from '../core/notifications.js';
 import { ProvenanceStore } from '../storage/provenance.js';
 import { QuarantineStore } from '../storage/quarantine.js';
 
@@ -42,17 +43,20 @@ export class IngressTagger {
   private detector: Detector;
   private provenanceStore: ProvenanceStore;
   private quarantineStore: QuarantineStore;
+  private notifier: Notifier | null;
   private currentSessionId: string;
 
   constructor(options: {
     detector: Detector;
     provenanceStore: ProvenanceStore;
     quarantineStore: QuarantineStore;
+    notifier?: Notifier;
     sessionId?: string;
   }) {
     this.detector = options.detector;
     this.provenanceStore = options.provenanceStore;
     this.quarantineStore = options.quarantineStore;
+    this.notifier = options.notifier ?? null;
     this.currentSessionId = options.sessionId ?? uuidv4();
   }
 
@@ -62,8 +66,8 @@ export class IngressTagger {
   async tag(options: TagOptions): Promise<TagResult> {
     const sessionId = options.sessionId ?? this.currentSessionId;
 
-    // Run detection pipeline
-    const detection = await this.detector.detect(options.text, options.trustLevel);
+    // Run detection pipeline (pass source for Layer 3 context)
+    const detection = await this.detector.detect(options.text, options.trustLevel, options.source);
 
     // Create provenance record
     const provenance = this.provenanceStore.create({
@@ -84,7 +88,16 @@ export class IngressTagger {
         layer1Flags: detection.layer1.patterns,
         layer2Similarity: detection.layer2.similarity,
         layer2Exemplar: detection.layer2.matchedExemplar,
+        layer3Verdict: detection.layer3?.verdict,
+        layer3Reasoning: detection.layer3?.reasoning,
       });
+
+      // Send notification
+      if (this.notifier) {
+        this.notifier.notify(quarantined, detection.reason).catch((err) => {
+          console.error('[memfw] Notification error:', err);
+        });
+      }
 
       return {
         allowed: false,

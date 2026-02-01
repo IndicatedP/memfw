@@ -21,6 +21,16 @@ export {
 
 // Detection pipeline
 export { Detector, createDetector } from './core/detector.js';
+export { LLMJudge, JudgeResult, JudgeVerdict, JudgeContext, createJudge } from './core/judge.js';
+export {
+  Notifier,
+  NotifierConfig,
+  NotificationChannel,
+  NotificationHandler,
+  QuarantineNotification,
+  WebhookConfig,
+  createNotifier,
+} from './core/notifications.js';
 export {
   PatternMatch,
   INSPECTION_TRIGGERS,

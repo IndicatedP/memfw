@@ -1,7 +1,8 @@
 {
   "detection": {
     "enabled": true,
-    "useLlmJudge": false,
+    "enableLayer3": false,
+    "layer3Model": "gpt-4o-mini",
     "sensitivity": "medium",
     "embeddingProvider": "openai"
   },
@@ -18,6 +19,7 @@
   },
   "notifications": {
     "onQuarantine": true,
+    "minRiskLevel": "LOW",
     "channel": null
   },
   "storage": {

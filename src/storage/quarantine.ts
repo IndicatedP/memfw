@@ -26,6 +26,8 @@ export class QuarantineStore {
         layer1_flags TEXT,
         layer2_similarity REAL,
         layer2_exemplar TEXT,
+        layer3_verdict TEXT,
+        layer3_reasoning TEXT,
         quarantined_at TEXT NOT NULL,
         status TEXT DEFAULT 'pending',
         reviewed_at TEXT,
@@ -35,6 +37,14 @@ export class QuarantineStore {
       CREATE INDEX IF NOT EXISTS idx_quarantine_status ON quarantine(status);
       CREATE INDEX IF NOT EXISTS idx_quarantine_date ON quarantine(quarantined_at);
     `);
+
+    // Migration: add Layer 3 columns if they don't exist
+    try {
+      this.db.exec(`ALTER TABLE quarantine ADD COLUMN layer3_verdict TEXT`);
+    } catch { /* Column already exists */ }
+    try {
+      this.db.exec(`ALTER TABLE quarantine ADD COLUMN layer3_reasoning TEXT`);
+    } catch { /* Column already exists */ }
   }
 
   /**
@@ -47,6 +57,8 @@ export class QuarantineStore {
     layer1Flags: string[];
     layer2Similarity: number;
     layer2Exemplar?: string;
+    layer3Verdict?: 'SAFE' | 'SUSPICIOUS' | 'DANGEROUS';
+    layer3Reasoning?: string;
   }): QuarantinedMemory {
     const id = uuidv4();
     const quarantinedAt = new Date();
@@ -54,8 +66,8 @@ export class QuarantineStore {
     const stmt = this.db.prepare(`
       INSERT INTO quarantine (
         id, text, source, trust_level, layer1_flags, layer2_similarity,
-        layer2_exemplar, quarantined_at, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+        layer2_exemplar, layer3_verdict, layer3_reasoning, quarantined_at, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
     `);
 
     stmt.run(
@@ -66,6 +78,8 @@ export class QuarantineStore {
       JSON.stringify(options.layer1Flags),
       options.layer2Similarity,
       options.layer2Exemplar ?? null,
+      options.layer3Verdict ?? null,
+      options.layer3Reasoning ?? null,
       quarantinedAt.toISOString()
     );
 
@@ -77,6 +91,8 @@ export class QuarantineStore {
       layer1Flags: options.layer1Flags,
       layer2Similarity: options.layer2Similarity,
       layer2Exemplar: options.layer2Exemplar,
+      layer3Verdict: options.layer3Verdict,
+      layer3Reasoning: options.layer3Reasoning,
       quarantinedAt,
       status: 'pending',
     };
@@ -204,6 +220,8 @@ export class QuarantineStore {
       layer1Flags: JSON.parse(row.layer1_flags || '[]'),
       layer2Similarity: row.layer2_similarity,
       layer2Exemplar: row.layer2_exemplar ?? undefined,
+      layer3Verdict: row.layer3_verdict as QuarantinedMemory['layer3Verdict'] ?? undefined,
+      layer3Reasoning: row.layer3_reasoning ?? undefined,
       quarantinedAt: new Date(row.quarantined_at),
       status: row.status as QuarantineStatus,
       reviewedAt: row.reviewed_at ? new Date(row.reviewed_at) : undefined,
@@ -230,6 +248,8 @@ interface QuarantineRow {
   layer1_flags: string;
   layer2_similarity: number;
   layer2_exemplar: string | null;
+  layer3_verdict: string | null;
+  layer3_reasoning: string | null;
   quarantined_at: string;
   status: string;
   reviewed_at: string | null;
