@@ -23,8 +23,16 @@
     "llm",
     "agent"
   ],
-  "author": "",
+  "author": "IndicatedP",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/IndicatedP/memfw.git"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "dependencies": {
     "better-sqlite3": "^12.6.2",
     "chalk": "^5.3.0",
