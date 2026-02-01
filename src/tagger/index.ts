@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { TrustLevel, MemoryProvenance, DetectionResult } from '../core/types.js';
 import { Detector } from '../core/detector.js';
 import { Notifier } from '../core/notifications.js';
+import { BaselineTracker, containsInstruction } from '../core/baseline.js';
 import { ProvenanceStore } from '../storage/provenance.js';
 import { QuarantineStore } from '../storage/quarantine.js';
 
@@ -44,6 +45,7 @@ export class IngressTagger {
   private provenanceStore: ProvenanceStore;
   private quarantineStore: QuarantineStore;
   private notifier: Notifier | null;
+  private baselineTracker: BaselineTracker | null;
   private currentSessionId: string;
 
   constructor(options: {
@@ -51,12 +53,14 @@ export class IngressTagger {
     provenanceStore: ProvenanceStore;
     quarantineStore: QuarantineStore;
     notifier?: Notifier;
+    baselineTracker?: BaselineTracker;
     sessionId?: string;
   }) {
     this.detector = options.detector;
     this.provenanceStore = options.provenanceStore;
     this.quarantineStore = options.quarantineStore;
     this.notifier = options.notifier ?? null;
+    this.baselineTracker = options.baselineTracker ?? null;
     this.currentSessionId = options.sessionId ?? uuidv4();
   }
 
@@ -65,9 +69,48 @@ export class IngressTagger {
    */
   async tag(options: TagOptions): Promise<TagResult> {
     const sessionId = options.sessionId ?? this.currentSessionId;
+    const hasInstruction = containsInstruction(options.text);
 
     // Run detection pipeline (pass source for Layer 3 context)
-    const detection = await this.detector.detect(options.text, options.trustLevel, options.source);
+    let detection = await this.detector.detect(options.text, options.trustLevel, options.source);
+
+    // Run anomaly detection if baseline tracker is available
+    if (this.baselineTracker) {
+      const anomalyResult = await this.baselineTracker.computeAnomaly({
+        text: options.text,
+        source: options.source,
+        trustLevel: options.trustLevel,
+        containsInstruction: hasInstruction,
+      });
+
+      // Add anomaly info to detection result
+      detection = {
+        ...detection,
+        anomaly: {
+          score: anomalyResult.score,
+          signals: anomalyResult.signals,
+          inLearningPeriod: anomalyResult.inLearningPeriod,
+        },
+      };
+
+      // If anomaly score is high, flag content
+      if (anomalyResult.score >= 0.7 && !anomalyResult.inLearningPeriod) {
+        detection = {
+          ...detection,
+          passed: false,
+          score: Math.max(detection.score, anomalyResult.score),
+          reason: detection.reason + `; Anomaly: ${anomalyResult.signals.map(s => s.description).join(', ')}`,
+        };
+      }
+
+      // Record memory in baseline (for learning)
+      await this.baselineTracker.recordMemory({
+        text: options.text,
+        source: options.source,
+        trustLevel: options.trustLevel,
+        containsInstruction: hasInstruction,
+      });
+    }
 
     // Create provenance record
     const provenance = this.provenanceStore.create({

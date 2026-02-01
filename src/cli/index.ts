@@ -8,6 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import { QuarantineStore } from '../storage/quarantine.js';
 import { ProvenanceStore } from '../storage/provenance.js';
+import { BaselineTracker } from '../core/baseline.js';
 import { TrustLevel, QuarantineStatus } from '../core/types.js';
 
 // Load environment variables
@@ -524,6 +525,81 @@ configCmd
 
     saveConfig(cfg);
     console.log(chalk.green(`✓ Set ${key} = ${value}`));
+  });
+
+// ==================== BASELINE COMMANDS ====================
+const baseline = program
+  .command('baseline')
+  .description('Manage behavioral baseline');
+
+baseline
+  .command('status')
+  .description('Show baseline learning status and statistics')
+  .action(() => {
+    ensureDataDir();
+    const tracker = new BaselineTracker(getDbPath('baseline'));
+
+    try {
+      const stats = tracker.getStats();
+
+      console.log();
+      console.log(chalk.bold('Behavioral Baseline Status'));
+      console.log(chalk.dim('─'.repeat(50)));
+      console.log();
+
+      // Learning status
+      if (stats.learningComplete) {
+        console.log(chalk.bold('Learning Status:'), chalk.green('COMPLETE'));
+      } else {
+        console.log(chalk.bold('Learning Status:'), chalk.yellow('IN PROGRESS'));
+        console.log(chalk.dim(`  Need ${7 - stats.daysCollected} more days and ${Math.max(0, 50 - stats.totalMemories)} more memories`));
+      }
+      console.log();
+
+      // Statistics
+      console.log(chalk.bold('Statistics:'));
+      console.log(`  Total memories tracked: ${stats.totalMemories}`);
+      console.log(`  Days of data: ${stats.daysCollected}`);
+      console.log(`  Memories per day (avg): ${stats.memoriesPerDay.toFixed(1)}`);
+      console.log(`  Instruction ratio: ${(stats.instructionRatio * 100).toFixed(1)}%`);
+      console.log(`  Started: ${formatDate(stats.startDate)}`);
+      console.log();
+
+      // Top sources
+      if (stats.topSources.length > 0) {
+        console.log(chalk.bold('Top Sources:'));
+        for (const { source, count } of stats.topSources.slice(0, 5)) {
+          console.log(`  ${source}: ${count}`);
+        }
+        console.log();
+      }
+
+      // Top domains
+      if (stats.topDomains.length > 0) {
+        console.log(chalk.bold('Top Domains:'));
+        for (const { domain, count } of stats.topDomains.slice(0, 5)) {
+          console.log(`  ${domain}: ${count}`);
+        }
+        console.log();
+      }
+    } finally {
+      tracker.close();
+    }
+  });
+
+baseline
+  .command('reset')
+  .description('Reset baseline and start fresh learning period')
+  .action(() => {
+    ensureDataDir();
+    const tracker = new BaselineTracker(getDbPath('baseline'));
+
+    try {
+      tracker.reset();
+      console.log(chalk.green('✓ Baseline reset. Learning period restarted.'));
+    } finally {
+      tracker.close();
+    }
   });
 
 // Parse and run

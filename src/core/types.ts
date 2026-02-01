@@ -62,6 +62,16 @@ export interface DetectionResult {
     confidence?: number;
     reasoning?: string;
   };
+  /** Anomaly detection results (behavioral baseline) */
+  anomaly?: {
+    score: number;
+    signals: Array<{
+      type: string;
+      description: string;
+      severity: number;
+    }>;
+    inLearningPeriod: boolean;
+  };
   /** Human-readable explanation */
   reason: string;
 }

@@ -188,16 +188,46 @@ Content → Layer 1 (patterns) → Layer 2 (embeddings) → Layer 3 (LLM)
 
 ---
 
-## Phase 4: Behavioral Baseline 🔲 NOT STARTED
+## Phase 4: Behavioral Baseline ✅ COMPLETE
 
-### Planned Deliverables
+### Deliverables
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Baseline tracking | 🔲 Todo | Track normal patterns |
-| Anomaly scoring | 🔲 Todo | Detect unusual activity |
-| Learning period | 🔲 Todo | Build baseline before flagging |
-| Baseline dashboard | 🔲 Todo | Visualize stats |
+| Baseline tracking | ✅ Done | `src/core/baseline.ts` - tracks patterns |
+| Anomaly scoring | ✅ Done | Detects new domains, sources, topics |
+| Learning period | ✅ Done | 7 days / 50 memories minimum |
+| CLI commands | ✅ Done | `memfw baseline status/reset` |
+| Integration | ✅ Done | IngressTagger uses baseline for detection |
+
+### Baseline Tracker Features
+
+**Tracked Patterns:**
+- Memory write frequency (rolling 30-day average)
+- Instruction ratio (% of memories with instructions)
+- Domain frequency (URLs seen in content)
+- Source frequency (where memories come from)
+- Topic embeddings (optional, for novelty detection)
+
+**Anomaly Signals:**
+- `new_domain`: URL domain never seen before
+- `new_source`: Memory source never seen before
+- `novel_topic`: Content dissimilar to previous topics
+- `unusual_instruction`: Instructions when historically rare
+- `frequency_spike`: Activity 2+ std devs above average
+
+**Learning Period:**
+- Minimum 7 days of data collection
+- Minimum 50 memories before flagging anomalies
+- Configurable thresholds
+- Can reset to start fresh
+
+### CLI Commands
+
+```bash
+memfw baseline status  # Show learning progress and statistics
+memfw baseline reset   # Reset baseline and restart learning
+```
 
 ---
 
@@ -224,7 +254,8 @@ memfw/
 │   │   ├── exemplars.ts      # Layer 2 attack exemplars
 │   │   ├── embeddings.ts     # OpenAI embedding client
 │   │   ├── judge.ts          # Layer 3 LLM judge
-│   │   └── notifications.ts  # Quarantine notifications
+│   │   ├── notifications.ts  # Quarantine notifications
+│   │   └── baseline.ts       # Behavioral baseline tracking
 │   ├── storage/
 │   │   ├── provenance.ts     # Provenance metadata store
 │   │   ├── memory.ts         # Memory store with FTS
@@ -299,8 +330,7 @@ export OPENAI_API_KEY=your-key-here
 
 ## Next Steps
 
-1. **Testing:** Add unit tests for detection pipeline and skill
-2. **Phase 4:** Add behavioral baseline and anomaly detection
-3. **Phase 4:** Add behavioral baseline and anomaly detection
-4. **Documentation:** Add API documentation
-5. **Publishing:** Publish to npm and OpenClaw skill registry
+1. **Testing:** Add unit tests for all detection layers
+2. **Documentation:** Add API documentation
+3. **Publishing:** Publish to npm and OpenClaw skill registry
+4. **Web Dashboard:** Optional audit/review UI (Phase 3 backlog)

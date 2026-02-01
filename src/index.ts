@@ -32,6 +32,15 @@ export {
   createNotifier,
 } from './core/notifications.js';
 export {
+  BaselineTracker,
+  BaselineConfig,
+  BaselineStats,
+  AnomalyResult,
+  AnomalySignal,
+  containsInstruction,
+  createBaselineTracker,
+} from './core/baseline.js';
+export {
   PatternMatch,
   INSPECTION_TRIGGERS,
   ALL_PATTERNS,
