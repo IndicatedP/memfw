@@ -10,6 +10,8 @@ import { QuarantineStore } from '../storage/quarantine.js';
 import { ProvenanceStore } from '../storage/provenance.js';
 import { BaselineTracker } from '../core/baseline.js';
 import { TrustLevel, QuarantineStatus } from '../core/types.js';
+import { Detector, createDetector } from '../core/detector.js';
+import { IngressTagger } from '../tagger/index.js';
 
 // Load environment variables
 config();
@@ -140,6 +142,167 @@ program
     } finally {
       quarantineStore.close();
       provenanceStore.close();
+    }
+  });
+
+// ==================== SCAN COMMAND ====================
+program
+  .command('scan [content]')
+  .description('Scan content for threats before storing in memory')
+  .option('-s, --source <source>', 'Content source (e.g., user, moltbook, web_fetch)', 'external')
+  .option('-t, --trust <level>', 'Trust level (user, tool_verified, tool_unverified, agent, external)', 'external')
+  .option('-q, --quick', 'Quick scan (Layer 1 patterns only, no API calls)')
+  .option('-j, --json', 'Output result as JSON')
+  .option('--stdin', 'Read content from stdin')
+  .option('--quarantine', 'Quarantine flagged content (default: just report)')
+  .action(async (content, options) => {
+    // Read content from stdin if specified or if no content provided
+    let textToScan = content;
+    if (options.stdin || !content) {
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) {
+        chunks.push(chunk);
+      }
+      textToScan = Buffer.concat(chunks).toString('utf-8').trim();
+    }
+
+    if (!textToScan) {
+      console.error(chalk.red('Error: No content provided. Use --stdin or pass content as argument.'));
+      process.exit(1);
+    }
+
+    // Parse trust level
+    const trustLevelMap: Record<string, TrustLevel> = {
+      user: TrustLevel.USER,
+      tool_verified: TrustLevel.TOOL_VERIFIED,
+      tool_unverified: TrustLevel.TOOL_UNVERIFIED,
+      agent: TrustLevel.AGENT,
+      external: TrustLevel.EXTERNAL,
+    };
+    const trustLevel = trustLevelMap[options.trust.toLowerCase()] ?? TrustLevel.EXTERNAL;
+
+    // Quick scan (Layer 1 only)
+    if (options.quick) {
+      const detector = new Detector({ enableLayer2: false, enableLayer3: false });
+      const result = detector.quickCheck(textToScan);
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          allowed: !result.suspicious,
+          quick: true,
+          patterns: result.patterns,
+          source: options.source,
+          trustLevel: options.trust,
+        }));
+        process.exit(result.suspicious ? 1 : 0);
+      }
+
+      if (result.suspicious) {
+        console.log(chalk.red('✗ BLOCKED'));
+        console.log(chalk.dim(`Patterns: ${result.patterns.join(', ')}`));
+        process.exit(1);
+      } else {
+        console.log(chalk.green('✓ PASS'));
+        process.exit(0);
+      }
+    }
+
+    // Full scan
+    ensureDataDir();
+
+    const openaiApiKey = process.env.OPENAI_API_KEY;
+    const enableLayer2 = !!openaiApiKey;
+
+    try {
+      const detector = await createDetector({
+        openaiApiKey,
+        enableLayer2,
+        enableLayer3: false, // Layer 3 is expensive, keep off by default for CLI
+      });
+
+      const provenanceStore = new ProvenanceStore(getDbPath('provenance'));
+      const quarantineStore = new QuarantineStore(getDbPath('quarantine'));
+
+      try {
+        if (options.quarantine) {
+          // Full scan with quarantine support
+          const tagger = new IngressTagger({
+            detector,
+            provenanceStore,
+            quarantineStore,
+          });
+
+          const result = await tagger.tag({
+            text: textToScan,
+            source: options.source,
+            trustLevel,
+          });
+
+          if (options.json) {
+            console.log(JSON.stringify({
+              allowed: result.allowed,
+              score: result.detection.score,
+              quarantineId: result.quarantineId,
+              reason: result.detection.reason,
+              layer1: result.detection.layer1,
+              layer2: result.detection.layer2,
+              source: options.source,
+              trustLevel: options.trust,
+            }));
+            process.exit(result.allowed ? 0 : 1);
+          }
+
+          if (result.allowed) {
+            console.log(chalk.green('✓ PASS') + chalk.dim(` (score: ${result.detection.score.toFixed(2)})`));
+          } else {
+            console.log(chalk.red('✗ BLOCKED') + chalk.dim(` (score: ${result.detection.score.toFixed(2)})`));
+            console.log(chalk.dim(`Reason: ${result.detection.reason}`));
+            if (result.quarantineId) {
+              console.log(chalk.yellow(`Quarantined: ${result.quarantineId.substring(0, 8)}`));
+            }
+          }
+          process.exit(result.allowed ? 0 : 1);
+        } else {
+          // Detection only (no quarantine)
+          const result = await detector.detect(textToScan, trustLevel, options.source);
+
+          if (options.json) {
+            console.log(JSON.stringify({
+              allowed: result.passed,
+              score: result.score,
+              reason: result.reason,
+              layer1: result.layer1,
+              layer2: result.layer2,
+              source: options.source,
+              trustLevel: options.trust,
+            }));
+            process.exit(result.passed ? 0 : 1);
+          }
+
+          if (result.passed) {
+            console.log(chalk.green('✓ PASS') + chalk.dim(` (score: ${result.score.toFixed(2)})`));
+          } else {
+            console.log(chalk.red('✗ BLOCKED') + chalk.dim(` (score: ${result.score.toFixed(2)})`));
+            console.log(chalk.dim(`Reason: ${result.reason}`));
+          }
+          process.exit(result.passed ? 0 : 1);
+        }
+      } finally {
+        provenanceStore.close();
+        quarantineStore.close();
+      }
+    } catch (error) {
+      if (options.json) {
+        console.log(JSON.stringify({
+          allowed: true,
+          error: String(error),
+          failOpen: true,
+        }));
+        process.exit(0); // Fail open
+      }
+      console.error(chalk.yellow('Warning: Detection error, failing open'));
+      console.error(chalk.dim(String(error)));
+      process.exit(0); // Fail open on error
     }
   });
 
