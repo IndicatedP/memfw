@@ -31,6 +31,8 @@
   },
   "files": [
     "dist",
+    "skill/hooks",
+    "skill/bootstrap",
     "README.md"
   ],
   "dependencies": {

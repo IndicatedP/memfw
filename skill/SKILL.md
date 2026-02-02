@@ -87,14 +87,51 @@ memfw classifies sources by trust level:
 
 ## Installation
 
-1. Copy this skill to your OpenClaw skills directory:
-   ```
+### Option 1: Automatic (Recommended)
+
+```bash
+# Clone the repo
+git clone https://github.com/IndicatedP/memfw.git
+cd memfw
+
+# Install and build
+npm install
+npm run build
+
+# Install CLI globally
+npm install -g .
+
+# Set up OpenClaw integration
+memfw install
+
+# Enable the bootstrap hook
+openclaw hooks enable memfw-bootstrap
+```
+
+### Option 2: Manual
+
+1. Copy the skill to your OpenClaw skills directory:
+   ```bash
    cp -r memfw ~/.openclaw/workspace/skills/
    ```
 
-2. Set your OpenAI API key (for Layer 2 semantic analysis):
+2. Copy the bootstrap hook:
+   ```bash
+   cp -r skill/hooks/memfw-bootstrap ~/.openclaw/workspace/hooks/
+   openclaw hooks enable memfw-bootstrap
    ```
+
+3. Set your OpenAI API key (optional, for Layer 2 semantic analysis):
+   ```bash
    export OPENAI_API_KEY=your-key-here
    ```
 
-3. The skill will automatically activate on memory operations.
+## How Protection Works
+
+The `memfw-bootstrap` hook injects a Memory Protection Protocol into your agent's `SOUL.md` at startup. This instructs the agent to:
+
+1. Run `memfw scan --quick "content"` before any memory write
+2. Only proceed if the scan passes
+3. Block and notify if content is flagged
+
+This is instruction-based protection - the agent follows the protocol as part of its core behavior.

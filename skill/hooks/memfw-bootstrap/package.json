@@ -1,0 +1,7 @@
+{
+  "name": "memfw-bootstrap",
+  "version": "0.1.0",
+  "description": "Injects memfw memory protection protocol at agent bootstrap",
+  "type": "module",
+  "main": "handler.ts"
+}
