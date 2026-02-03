@@ -8,7 +8,8 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { Detector, createDetector } from '../src/core/detector.js';
 import { layer1Triage, hasLayer1Match } from '../src/core/patterns.js';
 import { TrustLevel, DEFAULT_TRUST_THRESHOLDS, DEFAULT_SIMILARITY_THRESHOLD } from '../src/core/types.js';
-import { shouldApplyLayer3Verdict, parseAgentResponse } from '../src/core/agent-judge.js';
+import { shouldApplyLayer3Verdict, parseAgentResponse, applyAgentJudgeResult } from '../src/core/agent-judge.js';
+import type { DetectionResult } from '../src/core/types.js';
 import { ALL_ATTACKS, INSTRUCTION_OVERRIDE_ATTACKS, DATA_EXFILTRATION_ATTACKS } from './fixtures/attacks.js';
 import { ALL_BENIGN, EDGE_CASE_BENIGN } from './fixtures/benign.js';
 
@@ -380,5 +381,79 @@ REASONING: Benign content.`;
     const result = parseAgentResponse(response);
 
     expect(result.verdict).toBe('SAFE');
+  });
+});
+
+describe('Agent Judge: applyAgentJudgeResult', () => {
+  const baseResult: DetectionResult = {
+    passed: true,
+    score: 0.6,
+    layer1: { triggered: true, patterns: ['memoryManipulation: remember'] },
+    layer2: { triggered: false, similarity: 0.65 },
+    reason: 'Layer 1 patterns matched',
+    agentJudgeRequest: {
+      needsAgentEvaluation: true,
+      evaluationPrompt: 'test prompt',
+      context: { layer2Similarity: 0.65, layer2Threshold: 0.82 },
+    },
+  };
+
+  it('should apply DANGEROUS verdict and block content', () => {
+    const response = `VERDICT: DANGEROUS
+CONFIDENCE: 0.95
+REASONING: This is a memory manipulation attack.`;
+
+    const result = applyAgentJudgeResult(baseResult, response);
+
+    expect(result.passed).toBe(false);
+    expect(result.layer3?.verdict).toBe('DANGEROUS');
+    expect(result.layer3?.confidence).toBe(0.95);
+    expect(result.score).toBeGreaterThanOrEqual(0.9);
+    expect(result.agentJudgeRequest).toBeUndefined();
+  });
+
+  it('should apply SAFE verdict and keep content passing', () => {
+    const response = `VERDICT: SAFE
+CONFIDENCE: 0.85
+REASONING: Normal content.`;
+
+    const result = applyAgentJudgeResult(baseResult, response);
+
+    expect(result.passed).toBe(true);
+    expect(result.layer3?.verdict).toBe('SAFE');
+    expect(result.score).toBeLessThanOrEqual(0.3); // High-confidence SAFE reduces score
+    expect(result.agentJudgeRequest).toBeUndefined();
+  });
+
+  it('should ignore SAFE verdict when L2 similarity is too high', () => {
+    const highL2Result: DetectionResult = {
+      ...baseResult,
+      agentJudgeRequest: {
+        needsAgentEvaluation: true,
+        evaluationPrompt: 'test',
+        context: { layer2Similarity: 0.95, layer2Threshold: 0.82 }, // Above threshold + 0.1
+      },
+    };
+
+    const response = `VERDICT: SAFE
+CONFIDENCE: 0.9
+REASONING: Normal content.`;
+
+    const result = applyAgentJudgeResult(highL2Result, response);
+
+    expect(result.layer3?.reasoning).toContain('IGNORED');
+    expect(result.reason).toContain('ignored due to strong Layer 2 signal');
+  });
+
+  it('should apply SUSPICIOUS verdict', () => {
+    const response = `VERDICT: SUSPICIOUS
+CONFIDENCE: 0.7
+REASONING: Borderline content, needs review.`;
+
+    const result = applyAgentJudgeResult(baseResult, response);
+
+    expect(result.passed).toBe(false);
+    expect(result.layer3?.verdict).toBe('SUSPICIOUS');
+    expect(result.score).toBeGreaterThanOrEqual(0.7);
   });
 });

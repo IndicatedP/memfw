@@ -26,6 +26,7 @@ export {
   buildAgentEvaluationPrompt,
   shouldApplyLayer3Verdict,
   createAgentJudgeRequest,
+  applyAgentJudgeResult,
   AGENT_JUDGE_SYSTEM_PROMPT,
   LAYER3_OVERRIDE_THRESHOLD,
 } from './core/agent-judge.js';

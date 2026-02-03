@@ -6,7 +6,7 @@
  * and parsing functions for the agent to use.
  */
 
-import { TrustLevel } from './types.js';
+import { TrustLevel, DetectionResult } from './types.js';
 import { JudgeVerdict, JudgeResult, JudgeContext } from './judge.js';
 
 /**
@@ -156,5 +156,82 @@ export function createAgentJudgeRequest(
       layer2Similarity: context.layer2Similarity,
       layer2Threshold,
     },
+  };
+}
+
+/**
+ * Apply an agent's verdict to a DetectionResult
+ *
+ * This function takes a detection result that has an agentJudgeRequest
+ * and applies the agent's response, updating passed/score/reason.
+ *
+ * Uses shouldApplyLayer3Verdict() to enforce safety rules.
+ */
+export function applyAgentJudgeResult(
+  result: DetectionResult,
+  agentResponse: string
+): DetectionResult {
+  // Parse the agent's response
+  const parsed = parseAgentResponse(agentResponse);
+
+  // If no agentJudgeRequest context, just add the layer3 info
+  if (!result.agentJudgeRequest) {
+    return {
+      ...result,
+      layer3: {
+        evaluated: true,
+        verdict: parsed.verdict,
+        confidence: parsed.confidence,
+        reasoning: parsed.reasoning,
+      },
+    };
+  }
+
+  const { layer2Similarity, layer2Threshold } = result.agentJudgeRequest.context;
+
+  // Check if we should apply the verdict (safety check)
+  const shouldApply = shouldApplyLayer3Verdict(layer2Similarity, layer2Threshold, parsed.verdict);
+
+  if (!shouldApply) {
+    // SAFE verdict rejected due to strong L2 signal
+    return {
+      ...result,
+      layer3: {
+        evaluated: true,
+        verdict: parsed.verdict,
+        confidence: parsed.confidence,
+        reasoning: `[IGNORED - Strong L2 signal] ${parsed.reasoning}`,
+      },
+      reason: result.reason + '; Layer 3 SAFE verdict ignored due to strong Layer 2 signal',
+      agentJudgeRequest: undefined,
+    };
+  }
+
+  // Apply the verdict
+  const layer3Triggered = parsed.verdict === 'DANGEROUS' || parsed.verdict === 'SUSPICIOUS';
+  const newPassed = result.passed && !layer3Triggered;
+
+  // Recalculate score based on Layer 3
+  let newScore = result.score;
+  if (parsed.verdict === 'DANGEROUS') {
+    newScore = Math.max(newScore, 0.9);
+  } else if (parsed.verdict === 'SUSPICIOUS') {
+    newScore = Math.max(newScore, 0.7);
+  } else if (parsed.verdict === 'SAFE' && parsed.confidence > 0.8) {
+    newScore = Math.min(newScore, 0.3);
+  }
+
+  return {
+    ...result,
+    passed: newPassed,
+    score: newScore,
+    layer3: {
+      evaluated: true,
+      verdict: parsed.verdict,
+      confidence: parsed.confidence,
+      reasoning: parsed.reasoning,
+    },
+    reason: result.reason + `; Layer 3 agent judge: ${parsed.verdict} (${(parsed.confidence * 100).toFixed(0)}% confidence)`,
+    agentJudgeRequest: undefined,
   };
 }

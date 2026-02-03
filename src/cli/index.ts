@@ -12,6 +12,7 @@ import { BaselineTracker } from '../core/baseline.js';
 import { TrustLevel, QuarantineStatus } from '../core/types.js';
 import { Detector, createDetector } from '../core/detector.js';
 import { IngressTagger } from '../tagger/index.js';
+import { applyAgentJudgeResult } from '../core/agent-judge.js';
 
 // Load environment variables
 config();
@@ -182,6 +183,7 @@ program
   .option('--quarantine', 'Quarantine flagged content (default: just report)')
   .option('--fail-open', 'Allow content through on detection errors')
   .option('--fail-closed', 'Block content on detection errors (default)')
+  .option('--agent-response <text>', 'Apply agent verdict for borderline cases (format: "VERDICT: SAFE\\nCONFIDENCE: 0.9\\nREASONING: ...")')
   .action(async (content, options) => {
     // Read content from stdin if specified or if no content provided
     let textToScan = content;
@@ -304,10 +306,15 @@ program
           process.exit(result.allowed ? 0 : 1);
         } else {
           // Detection only (no quarantine)
-          const result = await detector.detect(textToScan, trustLevel, options.source);
+          let result = await detector.detect(textToScan, trustLevel, options.source);
 
           // Check if agent evaluation was requested (borderline case)
           const needsAgentEval = !!result.agentJudgeRequest;
+
+          // Apply agent response if provided
+          if (options.agentResponse && result.agentJudgeRequest) {
+            result = applyAgentJudgeResult(result, options.agentResponse);
+          }
 
           if (options.json) {
             console.log(JSON.stringify({
@@ -316,7 +323,9 @@ program
               reason: result.reason,
               layer1: result.layer1,
               layer2: result.layer2,
-              needsAgentEvaluation: needsAgentEval,
+              layer3: result.layer3,
+              needsAgentEvaluation: needsAgentEval && !options.agentResponse,
+              agentJudgePrompt: result.agentJudgeRequest?.evaluationPrompt,
               source: options.source,
               trustLevel: options.trust,
             }));
@@ -324,11 +333,14 @@ program
           }
 
           if (result.passed) {
-            if (needsAgentEval) {
+            if (result.layer3?.evaluated) {
+              // Agent evaluation was applied
+              console.log(chalk.green('✓ PASS') + chalk.dim(` (score: ${result.score.toFixed(2)}, L3: ${result.layer3.verdict})`));
+            } else if (needsAgentEval) {
               // Borderline case - passed L2 but L1 triggered, would benefit from agent evaluation
               console.log(chalk.yellow('⚠ BORDERLINE') + chalk.dim(` (score: ${result.score.toFixed(2)})`));
               console.log(chalk.dim('Layer 1 flagged but Layer 2 did not confirm'));
-              console.log(chalk.dim('Content passed, but agent evaluation recommended'));
+              console.log(chalk.dim('Use --agent-response to apply agent verdict'));
             } else {
               console.log(chalk.green('✓ PASS') + chalk.dim(` (score: ${result.score.toFixed(2)})`));
             }

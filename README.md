@@ -194,6 +194,23 @@ Before writing to MEMORY.md or memory/*.md, run:
 | ⚠ BORDERLINE | Full scan: Layer 1 flagged, Layer 2 didn't confirm | Content passed, but review recommended |
 | ✗ BLOCKED | Layer 2 or Layer 3 confirmed threat | Do not store |
 
+### Agent-as-Judge Flow
+
+For borderline cases (Layer 1 flagged, Layer 2 didn't confirm), you can apply an agent's verdict:
+
+```bash
+# First, get the evaluation prompt from JSON output
+memfw scan "content" --json
+# Returns: { ..., "agentJudgePrompt": "...", "needsAgentEvaluation": true }
+
+# Have your agent evaluate, then apply the response
+memfw scan "content" --agent-response "VERDICT: SAFE
+CONFIDENCE: 0.9
+REASONING: Normal user note"
+```
+
+The `applyAgentJudgeResult()` function is also available for programmatic use.
+
 ## Requirements
 
 - Node.js 18+

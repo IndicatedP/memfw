@@ -7,3 +7,4 @@ dist/
 *.db-shm
 .DS_Store
 coverage/
+memfw.config.json
