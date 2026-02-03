@@ -145,6 +145,23 @@ program
     }
   });
 
+// Helper to map sensitivity to threshold
+function sensitivityToThreshold(sensitivity: 'low' | 'medium' | 'high'): number {
+  const thresholds = {
+    low: 0.88,
+    medium: 0.82,
+    high: 0.75,
+  };
+  return thresholds[sensitivity];
+}
+
+// Helper to build trust thresholds from config
+function buildTrustThresholds(trustConfig: Record<string, TrustLevel>): Partial<Record<TrustLevel, number>> {
+  // Config trust overrides are for source->level mapping, not level->threshold
+  // Return empty to use defaults, actual source mapping happens at detection time
+  return {};
+}
+
 // ==================== SCAN COMMAND ====================
 program
   .command('scan [content]')
@@ -155,6 +172,8 @@ program
   .option('-j, --json', 'Output result as JSON')
   .option('--stdin', 'Read content from stdin')
   .option('--quarantine', 'Quarantine flagged content (default: just report)')
+  .option('--fail-open', 'Allow content through on detection errors')
+  .option('--fail-closed', 'Block content on detection errors (default)')
   .action(async (content, options) => {
     // Read content from stdin if specified or if no content provided
     let textToScan = content;
@@ -198,9 +217,10 @@ program
       }
 
       if (result.suspicious) {
-        console.log(chalk.red('✗ BLOCKED'));
+        console.log(chalk.yellow('⚠ SUSPICIOUS'));
         console.log(chalk.dim(`Patterns: ${result.patterns.join(', ')}`));
-        process.exit(1);
+        console.log(chalk.dim('Run full scan for confirmation'));
+        process.exit(0); // Quick scan doesn't block, only warns
       } else {
         console.log(chalk.green('✓ PASS'));
         process.exit(0);
@@ -210,14 +230,21 @@ program
     // Full scan
     ensureDataDir();
 
+    // Load config and apply settings
+    const cfg = loadConfig();
     const openaiApiKey = process.env.OPENAI_API_KEY;
-    const enableLayer2 = !!openaiApiKey;
+    const enableLayer2 = cfg.detection.enabled && !!openaiApiKey;
+
+    // Determine fail mode: default is fail-closed
+    const failOpen = options.failOpen && !options.failClosed;
 
     try {
       const detector = await createDetector({
         openaiApiKey,
         enableLayer2,
-        enableLayer3: false, // Layer 3 is expensive, keep off by default for CLI
+        enableLayer3: cfg.detection.useLlmJudge && !!openaiApiKey,
+        similarityThreshold: sensitivityToThreshold(cfg.detection.sensitivity),
+        trustThresholds: buildTrustThresholds(cfg.trust),
       });
 
       const provenanceStore = new ProvenanceStore(getDbPath('provenance'));
@@ -292,17 +319,26 @@ program
         quarantineStore.close();
       }
     } catch (error) {
+      // Default: fail-closed (block on error)
+      // With --fail-open: allow through on error
       if (options.json) {
         console.log(JSON.stringify({
-          allowed: true,
+          allowed: failOpen,
           error: String(error),
-          failOpen: true,
+          failOpen: failOpen,
         }));
-        process.exit(0); // Fail open
+        process.exit(failOpen ? 0 : 1);
       }
-      console.error(chalk.yellow('Warning: Detection error, failing open'));
-      console.error(chalk.dim(String(error)));
-      process.exit(0); // Fail open on error
+      if (failOpen) {
+        console.error(chalk.yellow('Warning: Detection error, failing open (--fail-open)'));
+        console.error(chalk.dim(String(error)));
+        process.exit(0);
+      } else {
+        console.error(chalk.red('Error: Detection failed, blocking content (fail-closed default)'));
+        console.error(chalk.dim(String(error)));
+        console.error(chalk.dim('Use --fail-open to allow content through on errors'));
+        process.exit(1);
+      }
     }
   });
 

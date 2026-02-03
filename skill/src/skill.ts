@@ -28,6 +28,7 @@ export interface SkillConfig {
   detection: {
     enabled: boolean;
     enableLayer3: boolean;
+    useAgentJudge: boolean; // Use agent's own LLM for Layer 3 evaluation
     layer3Model: string;
     sensitivity: 'low' | 'medium' | 'high';
     embeddingProvider: 'local' | 'openai';
@@ -51,6 +52,17 @@ export interface TagResult {
   provenance: MemoryProvenance;
   detection: DetectionResult;
   quarantineId?: string;
+  /** If present, agent should self-evaluate using this prompt */
+  agentJudgePrompt?: string;
+}
+
+/**
+ * Result from agent self-evaluation
+ */
+export interface AgentJudgeResponse {
+  verdict: 'SAFE' | 'SUSPICIOUS' | 'DANGEROUS';
+  confidence: number;
+  reasoning: string;
 }
 
 /**
@@ -89,12 +101,16 @@ export class MemfwSkill {
     // Initialize detector
     const openaiApiKey = process.env.OPENAI_API_KEY;
     const enableLayer2 = this.config.detection.enabled && !!openaiApiKey;
-    const enableLayer3 = this.config.detection.enableLayer3 && !!openaiApiKey;
+    // Only use external LLM judge if explicitly enabled AND not using agent judge
+    const enableLayer3 = this.config.detection.enableLayer3 &&
+                         !this.config.detection.useAgentJudge &&
+                         !!openaiApiKey;
 
     this.detector = new Detector({
       openaiApiKey,
       enableLayer2,
       enableLayer3,
+      useAgentJudge: this.config.detection.useAgentJudge,
       layer3Model: this.config.detection.layer3Model,
       similarityThreshold: this.getSensitivityThreshold(),
     });
@@ -133,6 +149,7 @@ export class MemfwSkill {
       detection: {
         enabled: true,
         enableLayer3: false,
+        useAgentJudge: true, // Default to agent-as-judge (zero external cost)
         layer3Model: 'gpt-4o-mini',
         sensitivity: 'medium',
         embeddingProvider: 'openai',
@@ -208,7 +225,129 @@ export class MemfwSkill {
       triggerContext: context.triggerContext,
     });
 
+    // If agent-as-judge is needed, include the prompt
+    if (result.detection.agentJudgeRequest) {
+      return {
+        ...result,
+        agentJudgePrompt: result.detection.agentJudgeRequest.evaluationPrompt,
+      };
+    }
+
     return result;
+  }
+
+  /**
+   * Apply agent's self-evaluation verdict to a detection result
+   *
+   * This should be called after the agent processes the agentJudgePrompt
+   * and returns its verdict.
+   *
+   * Safeguard: Layer 3 cannot override strong Layer 1+2 signals
+   * If Layer 2 similarity > threshold + 0.1, SAFE verdict is ignored
+   */
+  applyAgentJudgeVerdict(
+    result: TagResult,
+    agentResponse: AgentJudgeResponse
+  ): TagResult {
+    const detection = result.detection;
+
+    // Check if we should apply the verdict (safeguard against manipulation)
+    if (detection.agentJudgeRequest) {
+      const { layer2Similarity, layer2Threshold } = detection.agentJudgeRequest.context;
+      const strongSignalThreshold = layer2Threshold + 0.1;
+
+      // If strong detection signal and agent says SAFE, ignore the verdict
+      if (layer2Similarity >= strongSignalThreshold && agentResponse.verdict === 'SAFE') {
+        return {
+          ...result,
+          detection: {
+            ...detection,
+            layer3: {
+              evaluated: true,
+              verdict: agentResponse.verdict,
+              confidence: agentResponse.confidence,
+              reasoning: `[IGNORED - Strong L2 signal] ${agentResponse.reasoning}`,
+            },
+            reason: detection.reason + '; Layer 3 SAFE verdict ignored due to strong Layer 2 signal',
+          },
+        };
+      }
+    }
+
+    // Apply the verdict
+    const layer3Triggered = agentResponse.verdict === 'DANGEROUS' ||
+                            agentResponse.verdict === 'SUSPICIOUS';
+
+    // Recalculate if content should be allowed
+    const newPassed = detection.passed && !layer3Triggered;
+
+    // Recalculate score based on Layer 3
+    let newScore = detection.score;
+    if (agentResponse.verdict === 'DANGEROUS') {
+      newScore = Math.max(newScore, 0.9);
+    } else if (agentResponse.verdict === 'SUSPICIOUS') {
+      newScore = Math.max(newScore, 0.7);
+    } else if (agentResponse.verdict === 'SAFE' && agentResponse.confidence > 0.8) {
+      newScore = Math.min(newScore, 0.3);
+    }
+
+    return {
+      ...result,
+      allowed: newPassed,
+      detection: {
+        ...detection,
+        passed: newPassed,
+        score: newScore,
+        layer3: {
+          evaluated: true,
+          verdict: agentResponse.verdict,
+          confidence: agentResponse.confidence,
+          reasoning: agentResponse.reasoning,
+        },
+        reason: detection.reason +
+          `; Layer 3 agent judge: ${agentResponse.verdict} (${(agentResponse.confidence * 100).toFixed(0)}% confidence)`,
+        agentJudgeRequest: undefined, // Clear the request
+      },
+    };
+  }
+
+  /**
+   * Parse agent's response text into structured verdict
+   */
+  parseAgentResponse(responseText: string): AgentJudgeResponse {
+    const lines = responseText.trim().split('\n');
+
+    let verdict: 'SAFE' | 'SUSPICIOUS' | 'DANGEROUS' = 'SUSPICIOUS';
+    let confidence = 0.5;
+    let reasoning = 'Unable to parse response.';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      if (trimmed.startsWith('VERDICT:')) {
+        const v = trimmed.replace('VERDICT:', '').trim().toUpperCase();
+        if (v === 'SAFE' || v === 'SUSPICIOUS' || v === 'DANGEROUS') {
+          verdict = v;
+        }
+      } else if (trimmed.startsWith('CONFIDENCE:')) {
+        const c = parseFloat(trimmed.replace('CONFIDENCE:', '').trim());
+        if (!isNaN(c) && c >= 0 && c <= 1) {
+          confidence = c;
+        }
+      } else if (trimmed.startsWith('REASONING:')) {
+        reasoning = trimmed.replace('REASONING:', '').trim();
+      }
+    }
+
+    // Try to extract multi-line reasoning
+    if (reasoning === 'Unable to parse response.') {
+      const reasoningMatch = responseText.match(/REASONING:\s*(.+)/s);
+      if (reasoningMatch) {
+        reasoning = reasoningMatch[1].trim();
+      }
+    }
+
+    return { verdict, confidence, reasoning };
   }
 
   /**
@@ -362,6 +501,8 @@ export class MemfwSkill {
         }
       } else if (parts[1] === 'enableLayer3') {
         this.config.detection.enableLayer3 = value === true || value === 'true';
+      } else if (parts[1] === 'useAgentJudge') {
+        this.config.detection.useAgentJudge = value === true || value === 'true';
       } else {
         return false;
       }

@@ -62,6 +62,15 @@ export interface DetectionResult {
     confidence?: number;
     reasoning?: string;
   };
+  /** Agent-as-judge request (when useAgentJudge is enabled) */
+  agentJudgeRequest?: {
+    needsAgentEvaluation: true;
+    evaluationPrompt: string;
+    context: {
+      layer2Similarity: number;
+      layer2Threshold: number;
+    };
+  };
   /** Anomaly detection results (behavioral baseline) */
   anomaly?: {
     score: number;

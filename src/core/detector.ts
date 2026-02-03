@@ -8,6 +8,7 @@ import { layer1Triage, PatternMatch } from './patterns.js';
 import { EmbeddingClient, findMostSimilar } from './embeddings.js';
 import { getExemplarTexts, getExemplarByText } from './exemplars.js';
 import { LLMJudge, JudgeResult } from './judge.js';
+import { createAgentJudgeRequest, AgentJudgeRequest } from './agent-judge.js';
 
 /**
  * Detection pipeline combining Layer 1 (pattern), Layer 2 (semantic), and Layer 3 (LLM) analysis
@@ -19,6 +20,7 @@ export class Detector {
   private initialized = false;
   private enableLayer2: boolean;
   private enableLayer3: boolean;
+  private useAgentJudge: boolean;
   private baseSimilarityThreshold: number;
   private trustThresholds: Record<TrustLevel, number>;
 
@@ -26,12 +28,14 @@ export class Detector {
     openaiApiKey?: string;
     enableLayer2?: boolean;
     enableLayer3?: boolean;
+    useAgentJudge?: boolean;
     layer3Model?: string;
     similarityThreshold?: number;
     trustThresholds?: Partial<Record<TrustLevel, number>>;
   }) {
     this.enableLayer2 = options.enableLayer2 ?? true;
     this.enableLayer3 = options.enableLayer3 ?? false;
+    this.useAgentJudge = options.useAgentJudge ?? false;
     this.baseSimilarityThreshold = options.similarityThreshold ?? DEFAULT_SIMILARITY_THRESHOLD;
     this.trustThresholds = {
       ...DEFAULT_TRUST_THRESHOLDS,
@@ -80,9 +84,13 @@ export class Detector {
     const layer1Matches = layer1Triage(text);
     const layer1Triggered = layer1Matches.length > 0;
 
-    // If Layer 2 is disabled, make decision based on Layer 1 only
+    // If Layer 2 is disabled, Layer 1 alone should NOT block (triage only)
     if (!this.enableLayer2 || !this.embeddingClient) {
-      return this.buildResult(layer1Matches, null, null, null, layer1Triggered, trustLevel);
+      const result = this.buildResult(layer1Matches, null, null, null, false, trustLevel);
+      if (layer1Triggered) {
+        result.reason = 'Layer 1 patterns matched but Layer 2 unavailable for confirmation. ' + result.reason;
+      }
+      return result;
     }
 
     // Ensure initialized
@@ -91,7 +99,8 @@ export class Detector {
     }
 
     // Layer 2: Semantic similarity (only if Layer 1 triggers or trust level is low)
-    const shouldRunLayer2 = layer1Triggered || trustLevel === TrustLevel.EXTERNAL;
+    const lowTrustLevels = [TrustLevel.EXTERNAL, TrustLevel.TOOL_UNVERIFIED, TrustLevel.AGENT];
+    const shouldRunLayer2 = layer1Triggered || lowTrustLevels.includes(trustLevel);
 
     if (!shouldRunLayer2) {
       return this.buildResult(layer1Matches, null, null, null, false, trustLevel);
@@ -105,7 +114,9 @@ export class Detector {
 
     // Layer 3: LLM Judge for borderline cases
     let layer3Result: JudgeResult | null = null;
-    if (this.enableLayer3 && this.llmJudge && !layer2Triggered) {
+    let agentJudgeRequest: AgentJudgeRequest | null = null;
+
+    if (!layer2Triggered) {
       const shouldEvaluate = LLMJudge.shouldEvaluate({
         layer1Triggered,
         layer2Similarity: bestMatch?.similarity ?? 0,
@@ -114,14 +125,30 @@ export class Detector {
       });
 
       if (shouldEvaluate) {
-        layer3Result = await this.llmJudge.evaluate({
-          text,
-          source: source ?? 'unknown',
-          trustLevel,
-          layer1Flags: layer1Matches.map(m => `${m.category}: ${m.matched}`),
-          layer2Similarity: bestMatch?.similarity ?? 0,
-          layer2Exemplar: bestMatch?.text,
-        });
+        if (this.useAgentJudge) {
+          // Return request for agent to self-evaluate
+          agentJudgeRequest = createAgentJudgeRequest(
+            {
+              text,
+              source: source ?? 'unknown',
+              trustLevel,
+              layer1Flags: layer1Matches.map(m => `${m.category}: ${m.matched}`),
+              layer2Similarity: bestMatch?.similarity ?? 0,
+              layer2Exemplar: bestMatch?.text,
+            },
+            threshold
+          );
+        } else if (this.enableLayer3 && this.llmJudge) {
+          // Use external LLM judge
+          layer3Result = await this.llmJudge.evaluate({
+            text,
+            source: source ?? 'unknown',
+            trustLevel,
+            layer1Flags: layer1Matches.map(m => `${m.category}: ${m.matched}`),
+            layer2Similarity: bestMatch?.similarity ?? 0,
+            layer2Exemplar: bestMatch?.text,
+          });
+        }
       }
     }
 
@@ -130,7 +157,14 @@ export class Detector {
                             layer3Result?.verdict === 'SUSPICIOUS';
     const flagged = layer1Triggered || layer2Triggered || layer3Triggered;
 
-    return this.buildResult(layer1Matches, bestMatch, threshold, layer3Result, flagged, trustLevel);
+    const result = this.buildResult(layer1Matches, bestMatch, threshold, layer3Result, flagged, trustLevel);
+
+    // Add agent judge request if needed
+    if (agentJudgeRequest) {
+      result.agentJudgeRequest = agentJudgeRequest;
+    }
+
+    return result;
   }
 
   /**
@@ -253,6 +287,7 @@ export async function createDetector(options: {
   openaiApiKey?: string;
   enableLayer2?: boolean;
   enableLayer3?: boolean;
+  useAgentJudge?: boolean;
   layer3Model?: string;
   similarityThreshold?: number;
   trustThresholds?: Partial<Record<TrustLevel, number>>;
@@ -260,4 +295,11 @@ export async function createDetector(options: {
   const detector = new Detector(options);
   await detector.initialize();
   return detector;
+}
+
+/**
+ * Check if agent judge is enabled
+ */
+export function isAgentJudgeEnabled(detector: Detector): boolean {
+  return (detector as any).useAgentJudge ?? false;
 }

@@ -18,9 +18,18 @@ export type {
 } from './core/types.js';
 
 // Detection pipeline
-export { Detector, createDetector } from './core/detector.js';
+export { Detector, createDetector, isAgentJudgeEnabled } from './core/detector.js';
 export { LLMJudge, createJudge } from './core/judge.js';
 export type { JudgeResult, JudgeVerdict, JudgeContext } from './core/judge.js';
+export {
+  parseAgentResponse,
+  buildAgentEvaluationPrompt,
+  shouldApplyLayer3Verdict,
+  createAgentJudgeRequest,
+  AGENT_JUDGE_SYSTEM_PROMPT,
+  LAYER3_OVERRIDE_THRESHOLD,
+} from './core/agent-judge.js';
+export type { AgentJudgeRequest } from './core/agent-judge.js';
 export { Notifier, createNotifier } from './core/notifications.js';
 export type {
   NotifierConfig,
