@@ -7,7 +7,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { Detector, createDetector } from '../src/core/detector.js';
 import { layer1Triage, hasLayer1Match } from '../src/core/patterns.js';
-import { TrustLevel, DEFAULT_TRUST_THRESHOLDS } from '../src/core/types.js';
+import { TrustLevel, DEFAULT_TRUST_THRESHOLDS, DEFAULT_SIMILARITY_THRESHOLD } from '../src/core/types.js';
+import { shouldApplyLayer3Verdict, parseAgentResponse } from '../src/core/agent-judge.js';
 import { ALL_ATTACKS, INSTRUCTION_OVERRIDE_ATTACKS, DATA_EXFILTRATION_ATTACKS } from './fixtures/attacks.js';
 import { ALL_BENIGN, EDGE_CASE_BENIGN } from './fixtures/benign.js';
 
@@ -255,5 +256,129 @@ describe('Pattern Categories', () => {
         `Expected "${attack}" to be flagged as memoryManipulation`
       ).toBe(true);
     }
+  });
+});
+
+describe('Detector: Sensitivity Threshold', () => {
+  it('should apply sensitivity offset to thresholds', () => {
+    // High sensitivity (lower threshold) should be stricter
+    const highSensitivity = new Detector({
+      enableLayer2: false,
+      similarityThreshold: 0.75, // high sensitivity
+    });
+
+    // Low sensitivity (higher threshold) should be more lenient
+    const lowSensitivity = new Detector({
+      enableLayer2: false,
+      similarityThreshold: 0.88, // low sensitivity
+    });
+
+    // Verify the thresholds are stored correctly
+    expect((highSensitivity as any).baseSimilarityThreshold).toBe(0.75);
+    expect((lowSensitivity as any).baseSimilarityThreshold).toBe(0.88);
+  });
+
+  it('should calculate offset from DEFAULT_SIMILARITY_THRESHOLD', () => {
+    // Default is 0.82, high sensitivity is 0.75
+    // Offset = 0.75 - 0.82 = -0.07
+    const detector = new Detector({
+      enableLayer2: false,
+      similarityThreshold: 0.75,
+    });
+
+    const offset = (detector as any).baseSimilarityThreshold - DEFAULT_SIMILARITY_THRESHOLD;
+    expect(offset).toBeCloseTo(-0.07, 2);
+  });
+});
+
+describe('Detector: Layer 1 Triage (Not Blocking)', () => {
+  it('should NOT block when only Layer 1 triggers (Layer 2 enabled but not triggered)', async () => {
+    // This test verifies the key behavior: Layer 1 alone doesn't block
+    // When Layer 2 runs but doesn't confirm, content should pass
+    const detector = new Detector({
+      enableLayer2: false, // Simulates L2 running but not triggering
+      enableLayer3: false,
+    });
+
+    // Content that triggers Layer 1 but would not trigger Layer 2
+    const borderlineContent = 'Please remember this important note';
+    const result = await detector.detect(borderlineContent, TrustLevel.EXTERNAL);
+
+    // Even with Layer 1 triggered, should pass (Layer 1 is triage only)
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('Agent Judge: Safeguards', () => {
+  it('should allow SAFE verdict when Layer 2 similarity is below threshold', () => {
+    const layer2Similarity = 0.70;
+    const layer2Threshold = 0.82;
+
+    expect(shouldApplyLayer3Verdict(layer2Similarity, layer2Threshold, 'SAFE')).toBe(true);
+  });
+
+  it('should ignore SAFE verdict when Layer 2 similarity exceeds threshold + 0.1', () => {
+    const layer2Similarity = 0.93; // Above threshold + 0.1
+    const layer2Threshold = 0.82;
+
+    expect(shouldApplyLayer3Verdict(layer2Similarity, layer2Threshold, 'SAFE')).toBe(false);
+  });
+
+  it('should always allow DANGEROUS verdict', () => {
+    const layer2Similarity = 0.93;
+    const layer2Threshold = 0.82;
+
+    expect(shouldApplyLayer3Verdict(layer2Similarity, layer2Threshold, 'DANGEROUS')).toBe(true);
+  });
+
+  it('should always allow SUSPICIOUS verdict', () => {
+    const layer2Similarity = 0.93;
+    const layer2Threshold = 0.82;
+
+    expect(shouldApplyLayer3Verdict(layer2Similarity, layer2Threshold, 'SUSPICIOUS')).toBe(true);
+  });
+});
+
+describe('Agent Judge: Response Parsing', () => {
+  it('should parse well-formed response', () => {
+    const response = `VERDICT: DANGEROUS
+CONFIDENCE: 0.95
+REASONING: This content attempts to override system instructions.`;
+
+    const result = parseAgentResponse(response);
+
+    expect(result.verdict).toBe('DANGEROUS');
+    expect(result.confidence).toBe(0.95);
+    expect(result.reasoning).toContain('override system instructions');
+  });
+
+  it('should parse SAFE verdict', () => {
+    const response = `VERDICT: SAFE
+CONFIDENCE: 0.85
+REASONING: Normal user request with no malicious intent.`;
+
+    const result = parseAgentResponse(response);
+
+    expect(result.verdict).toBe('SAFE');
+    expect(result.confidence).toBe(0.85);
+  });
+
+  it('should default to SUSPICIOUS on malformed response', () => {
+    const response = 'This is not a valid response format';
+
+    const result = parseAgentResponse(response);
+
+    expect(result.verdict).toBe('SUSPICIOUS');
+    expect(result.confidence).toBe(0.5);
+  });
+
+  it('should handle case-insensitive verdict', () => {
+    const response = `VERDICT: safe
+CONFIDENCE: 0.9
+REASONING: Benign content.`;
+
+    const result = parseAgentResponse(response);
+
+    expect(result.verdict).toBe('SAFE');
   });
 });

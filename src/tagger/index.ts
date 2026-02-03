@@ -18,6 +18,8 @@ export interface TagResult {
   detection: DetectionResult;
   /** Quarantine ID if content was quarantined */
   quarantineId?: string;
+  /** Whether agent self-evaluation is needed (borderline case) */
+  needsAgentEvaluation?: boolean;
 }
 
 /**
@@ -154,6 +156,7 @@ export class IngressTagger {
       allowed: true,
       provenance,
       detection,
+      needsAgentEvaluation: !!detection.agentJudgeRequest,
     };
   }
 

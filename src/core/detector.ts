@@ -71,9 +71,16 @@ export class Detector {
 
   /**
    * Get the similarity threshold for a given trust level
+   * Applies sensitivity offset from baseSimilarityThreshold
    */
   private getThreshold(trustLevel: TrustLevel): number {
-    return this.trustThresholds[trustLevel];
+    // Calculate offset from default threshold based on sensitivity setting
+    // High sensitivity (lower base) -> negative offset -> stricter detection
+    // Low sensitivity (higher base) -> positive offset -> more lenient
+    const sensitivityOffset = this.baseSimilarityThreshold - DEFAULT_SIMILARITY_THRESHOLD;
+    const adjusted = this.trustThresholds[trustLevel] + sensitivityOffset;
+    // Clamp to valid range [0.5, 0.99]
+    return Math.max(0.5, Math.min(0.99, adjusted));
   }
 
   /**
@@ -152,10 +159,11 @@ export class Detector {
       }
     }
 
-    // Determine if flagged based on all layers
+    // Determine if flagged based on Layer 2 and Layer 3 only
+    // Layer 1 is triage-only: it gates Layer 2 but doesn't block by itself
     const layer3Triggered = layer3Result?.verdict === 'DANGEROUS' ||
                             layer3Result?.verdict === 'SUSPICIOUS';
-    const flagged = layer1Triggered || layer2Triggered || layer3Triggered;
+    const flagged = layer2Triggered || layer3Triggered;
 
     const result = this.buildResult(layer1Matches, bestMatch, threshold, layer3Result, flagged, trustLevel);
 

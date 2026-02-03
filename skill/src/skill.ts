@@ -18,6 +18,7 @@ import {
   MemoryProvenance,
   Notifier,
   createNotifier,
+  shouldApplyLayer3Verdict,
 } from 'memfw';
 import type { SkillContext, MemoryContext } from './index.js';
 
@@ -254,10 +255,9 @@ export class MemfwSkill {
     // Check if we should apply the verdict (safeguard against manipulation)
     if (detection.agentJudgeRequest) {
       const { layer2Similarity, layer2Threshold } = detection.agentJudgeRequest.context;
-      const strongSignalThreshold = layer2Threshold + 0.1;
 
-      // If strong detection signal and agent says SAFE, ignore the verdict
-      if (layer2Similarity >= strongSignalThreshold && agentResponse.verdict === 'SAFE') {
+      // Use the exported safeguard function
+      if (!shouldApplyLayer3Verdict(layer2Similarity, layer2Threshold, agentResponse.verdict)) {
         return {
           ...result,
           detection: {

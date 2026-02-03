@@ -155,11 +155,19 @@ function sensitivityToThreshold(sensitivity: 'low' | 'medium' | 'high'): number 
   return thresholds[sensitivity];
 }
 
-// Helper to build trust thresholds from config
-function buildTrustThresholds(trustConfig: Record<string, TrustLevel>): Partial<Record<TrustLevel, number>> {
-  // Config trust overrides are for source->level mapping, not level->threshold
-  // Return empty to use defaults, actual source mapping happens at detection time
-  return {};
+// Helper to get trust level from source using config overrides
+function getTrustLevelFromSource(
+  source: string,
+  trustOverrides: Record<string, TrustLevel>,
+  defaultTrust: TrustLevel
+): TrustLevel {
+  const sourceLower = source.toLowerCase();
+  for (const [pattern, level] of Object.entries(trustOverrides)) {
+    if (sourceLower.includes(pattern.toLowerCase())) {
+      return level;
+    }
+  }
+  return defaultTrust;
 }
 
 // ==================== SCAN COMMAND ====================
@@ -190,7 +198,7 @@ program
       process.exit(1);
     }
 
-    // Parse trust level
+    // Parse trust level from --trust flag
     const trustLevelMap: Record<string, TrustLevel> = {
       user: TrustLevel.USER,
       tool_verified: TrustLevel.TOOL_VERIFIED,
@@ -198,7 +206,10 @@ program
       agent: TrustLevel.AGENT,
       external: TrustLevel.EXTERNAL,
     };
-    const trustLevel = trustLevelMap[options.trust.toLowerCase()] ?? TrustLevel.EXTERNAL;
+    const flagTrustLevel = trustLevelMap[options.trust.toLowerCase()] ?? TrustLevel.EXTERNAL;
+
+    // Will be updated with config overrides in full scan
+    let trustLevel = flagTrustLevel;
 
     // Quick scan (Layer 1 only)
     if (options.quick) {
@@ -235,6 +246,9 @@ program
     const openaiApiKey = process.env.OPENAI_API_KEY;
     const enableLayer2 = cfg.detection.enabled && !!openaiApiKey;
 
+    // Apply trust overrides from config based on source
+    trustLevel = getTrustLevelFromSource(options.source, cfg.trust, flagTrustLevel);
+
     // Determine fail mode: default is fail-closed
     const failOpen = options.failOpen && !options.failClosed;
 
@@ -244,7 +258,6 @@ program
         enableLayer2,
         enableLayer3: cfg.detection.useLlmJudge && !!openaiApiKey,
         similarityThreshold: sensitivityToThreshold(cfg.detection.sensitivity),
-        trustThresholds: buildTrustThresholds(cfg.trust),
       });
 
       const provenanceStore = new ProvenanceStore(getDbPath('provenance'));
@@ -293,6 +306,9 @@ program
           // Detection only (no quarantine)
           const result = await detector.detect(textToScan, trustLevel, options.source);
 
+          // Check if agent evaluation was requested (borderline case)
+          const needsAgentEval = !!result.agentJudgeRequest;
+
           if (options.json) {
             console.log(JSON.stringify({
               allowed: result.passed,
@@ -300,6 +316,7 @@ program
               reason: result.reason,
               layer1: result.layer1,
               layer2: result.layer2,
+              needsAgentEvaluation: needsAgentEval,
               source: options.source,
               trustLevel: options.trust,
             }));
@@ -307,7 +324,14 @@ program
           }
 
           if (result.passed) {
-            console.log(chalk.green('✓ PASS') + chalk.dim(` (score: ${result.score.toFixed(2)})`));
+            if (needsAgentEval) {
+              // Borderline case - passed L2 but L1 triggered, would benefit from agent evaluation
+              console.log(chalk.yellow('⚠ BORDERLINE') + chalk.dim(` (score: ${result.score.toFixed(2)})`));
+              console.log(chalk.dim('Layer 1 flagged but Layer 2 did not confirm'));
+              console.log(chalk.dim('Content passed, but agent evaluation recommended'));
+            } else {
+              console.log(chalk.green('✓ PASS') + chalk.dim(` (score: ${result.score.toFixed(2)})`));
+            }
           } else {
             console.log(chalk.red('✗ BLOCKED') + chalk.dim(` (score: ${result.score.toFixed(2)})`));
             console.log(chalk.dim(`Reason: ${result.reason}`));
