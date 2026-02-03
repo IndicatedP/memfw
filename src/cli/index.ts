@@ -215,18 +215,23 @@ program
 
     // Quick scan (Layer 1 only)
     if (options.quick) {
+      // Load config for trust overrides even in quick scan
+      const cfg = loadConfig();
+      const effectiveTrustLevel = getTrustLevelFromSource(options.source, cfg.trust, flagTrustLevel);
+
       const detector = new Detector({ enableLayer2: false, enableLayer3: false });
       const result = detector.quickCheck(textToScan);
 
       if (options.json) {
         console.log(JSON.stringify({
-          allowed: !result.suspicious,
+          allowed: true, // Quick scan never blocks
+          suspicious: result.suspicious,
           quick: true,
           patterns: result.patterns,
           source: options.source,
-          trustLevel: options.trust,
+          trustLevel: effectiveTrustLevel,
         }));
-        process.exit(result.suspicious ? 1 : 0);
+        process.exit(0); // Quick scan is non-blocking, always exit 0
       }
 
       if (result.suspicious) {
@@ -274,11 +279,24 @@ program
             quarantineStore,
           });
 
-          const result = await tagger.tag({
+          let result = await tagger.tag({
             text: textToScan,
             source: options.source,
             trustLevel,
           });
+
+          // Check if agent evaluation was requested (borderline case)
+          const needsAgentEval = result.needsAgentEvaluation;
+
+          // Apply agent response if provided
+          if (options.agentResponse && result.detection.agentJudgeRequest) {
+            const updatedDetection = applyAgentJudgeResult(result.detection, options.agentResponse);
+            result = {
+              ...result,
+              allowed: updatedDetection.passed,
+              detection: updatedDetection,
+            };
+          }
 
           if (options.json) {
             console.log(JSON.stringify({
@@ -288,14 +306,24 @@ program
               reason: result.detection.reason,
               layer1: result.detection.layer1,
               layer2: result.detection.layer2,
+              layer3: result.detection.layer3,
+              needsAgentEvaluation: needsAgentEval && !options.agentResponse,
+              agentJudgePrompt: result.detection.agentJudgeRequest?.evaluationPrompt,
               source: options.source,
-              trustLevel: options.trust,
+              trustLevel,
             }));
             process.exit(result.allowed ? 0 : 1);
           }
 
           if (result.allowed) {
-            console.log(chalk.green('✓ PASS') + chalk.dim(` (score: ${result.detection.score.toFixed(2)})`));
+            if (result.detection.layer3?.evaluated) {
+              console.log(chalk.green('✓ PASS') + chalk.dim(` (score: ${result.detection.score.toFixed(2)}, L3: ${result.detection.layer3.verdict})`));
+            } else if (needsAgentEval) {
+              console.log(chalk.yellow('⚠ BORDERLINE') + chalk.dim(` (score: ${result.detection.score.toFixed(2)})`));
+              console.log(chalk.dim('Use --agent-response to apply agent verdict'));
+            } else {
+              console.log(chalk.green('✓ PASS') + chalk.dim(` (score: ${result.detection.score.toFixed(2)})`));
+            }
           } else {
             console.log(chalk.red('✗ BLOCKED') + chalk.dim(` (score: ${result.detection.score.toFixed(2)})`));
             console.log(chalk.dim(`Reason: ${result.detection.reason}`));
@@ -327,7 +355,7 @@ program
               needsAgentEvaluation: needsAgentEval && !options.agentResponse,
               agentJudgePrompt: result.agentJudgeRequest?.evaluationPrompt,
               source: options.source,
-              trustLevel: options.trust,
+              trustLevel,
             }));
             process.exit(result.passed ? 0 : 1);
           }
