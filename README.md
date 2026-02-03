@@ -67,10 +67,11 @@ console.log(result.layer1.patterns); // ['instructionOverride: Ignore previous i
 ```bash
 # Scan content before writing to memory
 memfw scan "content to check"                    # Full scan
-memfw scan --quick "content"                     # Fast pattern-only scan (no API)
-memfw scan --quick --trust external "content"   # Scan for external sources
+memfw scan --quick "content"                     # Fast pattern-only (never blocks, just warns)
+memfw scan --quarantine "content"                # Full scan with quarantine support
 echo "content" | memfw scan --stdin --json       # Pipe content, JSON output
 memfw scan --fail-open "content"                 # Allow through on errors (default: fail-closed)
+memfw scan --agent-response "VERDICT: SAFE..."   # Apply agent verdict for borderline cases
 
 # Configuration
 memfw config show                               # Show current settings
@@ -187,12 +188,28 @@ Before writing to MEMORY.md or memory/*.md, run:
 
 ### CLI Output States
 
-| Output | Meaning | Action |
-|--------|---------|--------|
-| ✓ PASS | Content is safe | Proceed |
-| ⚠ SUSPICIOUS | Quick scan: Layer 1 patterns matched | Run full scan |
-| ⚠ BORDERLINE | Full scan: Layer 1 flagged, Layer 2 didn't confirm | Content passed, but review recommended |
-| ✗ BLOCKED | Layer 2 or Layer 3 confirmed threat | Do not store |
+| Output | Meaning | Exit Code |
+|--------|---------|-----------|
+| ✓ PASS | Content is safe | 0 |
+| ⚠ SUSPICIOUS | Quick scan: Layer 1 patterns matched | 0 (never blocks) |
+| ⚠ BORDERLINE | Full scan: Layer 1 flagged, Layer 2 didn't confirm | 0 (passed) |
+| ✗ BLOCKED | Layer 2 or Layer 3 confirmed threat | 1 |
+
+**Quick scan (`--quick`) never blocks** - it only warns. Use full scan for confirmation.
+
+### JSON Output
+
+```bash
+# Quick scan JSON (never blocks, exit 0)
+memfw scan --quick "content" --json
+# {"allowed":true,"suspicious":true,"patterns":[...],"trustLevel":"external"}
+
+# Full scan JSON
+memfw scan "content" --json
+# {"allowed":true,"score":0.6,"needsAgentEvaluation":true,"agentJudgePrompt":"..."}
+```
+
+The `trustLevel` in JSON output reflects config overrides (not just the `--trust` flag).
 
 ### Agent-as-Judge Flow
 
@@ -207,6 +224,9 @@ memfw scan "content" --json
 memfw scan "content" --agent-response "VERDICT: SAFE
 CONFIDENCE: 0.9
 REASONING: Normal user note"
+
+# Also works with quarantine
+memfw scan "content" --quarantine --agent-response "VERDICT: ..."
 ```
 
 The `applyAgentJudgeResult()` function is also available for programmatic use.
