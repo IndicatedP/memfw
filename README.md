@@ -225,9 +225,13 @@ memfw scan "content" --agent-response "VERDICT: SAFE
 CONFIDENCE: 0.9
 REASONING: Normal user note"
 
-# Also works with quarantine
+# Also works with quarantine (updates record to approved/rejected)
 memfw scan "content" --quarantine --agent-response "VERDICT: ..."
 ```
+
+When using `--quarantine` with `--agent-response`, the quarantine record is automatically updated:
+- `SAFE` verdict → record approved
+- `SUSPICIOUS`/`DANGEROUS` verdict → record rejected
 
 The `applyAgentJudgeResult()` function is also available for programmatic use.
 

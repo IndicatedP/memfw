@@ -296,6 +296,15 @@ program
               allowed: updatedDetection.passed,
               detection: updatedDetection,
             };
+
+            // Update quarantine record based on agent verdict
+            if (result.quarantineId && updatedDetection.layer3?.verdict) {
+              if (updatedDetection.layer3.verdict === 'SAFE') {
+                quarantineStore.approve(result.quarantineId, 'agent-judge');
+              } else {
+                quarantineStore.reject(result.quarantineId, 'agent-judge');
+              }
+            }
           }
 
           if (options.json) {
