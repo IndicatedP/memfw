@@ -91,10 +91,24 @@ export class Detector {
     const layer1Matches = layer1Triage(text);
     const layer1Triggered = layer1Matches.length > 0;
 
-    // If Layer 2 is disabled, Layer 1 alone should NOT block (triage only)
+    // If Layer 2 is disabled, use Agent Judge directly for Layer 1 hits (if enabled)
     if (!this.enableLayer2 || !this.embeddingClient) {
       const result = this.buildResult(layer1Matches, null, null, null, false, trustLevel);
-      if (layer1Triggered) {
+      if (layer1Triggered && this.useAgentJudge) {
+        // Route directly to Agent Judge when Layer 2 unavailable
+        result.agentJudgeRequest = createAgentJudgeRequest(
+          {
+            text,
+            source: source ?? 'unknown',
+            trustLevel,
+            layer1Flags: layer1Matches.map(m => `${m.category}: ${m.matched}`),
+            layer2Similarity: 0,
+            layer2Exemplar: undefined,
+          },
+          this.getThreshold(trustLevel)
+        );
+        result.reason = 'Layer 1 patterns matched; awaiting Agent Judge evaluation';
+      } else if (layer1Triggered) {
         result.reason = 'Layer 1 patterns matched but Layer 2 unavailable for confirmation. ' + result.reason;
       }
       return result;

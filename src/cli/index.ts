@@ -264,6 +264,7 @@ program
         openaiApiKey,
         enableLayer2,
         enableLayer3: cfg.detection.useLlmJudge && !!openaiApiKey,
+        useAgentJudge: cfg.detection.useAgentJudge,
         similarityThreshold: sensitivityToThreshold(cfg.detection.sensitivity),
       });
 
@@ -700,6 +701,7 @@ interface MemfwCliConfig {
   detection: {
     enabled: boolean;
     useLlmJudge: boolean;
+    useAgentJudge: boolean;
     sensitivity: 'low' | 'medium' | 'high';
   };
   trust: Record<string, TrustLevel>;
@@ -709,6 +711,7 @@ const DEFAULT_CONFIG: MemfwCliConfig = {
   detection: {
     enabled: true,
     useLlmJudge: false,
+    useAgentJudge: true,
     sensitivity: 'medium',
   },
   trust: {
@@ -744,9 +747,10 @@ configCmd
     console.log(chalk.dim('─'.repeat(40)));
     console.log();
     console.log(chalk.bold('Detection:'));
-    console.log(`  enabled:      ${cfg.detection.enabled ? chalk.green('true') : chalk.red('false')}`);
-    console.log(`  useLlmJudge:  ${cfg.detection.useLlmJudge ? chalk.green('true') : chalk.red('false')}`);
-    console.log(`  sensitivity:  ${cfg.detection.sensitivity}`);
+    console.log(`  enabled:       ${cfg.detection.enabled ? chalk.green('true') : chalk.red('false')}`);
+    console.log(`  useAgentJudge: ${cfg.detection.useAgentJudge ? chalk.green('true') : chalk.red('false')}`);
+    console.log(`  useLlmJudge:   ${cfg.detection.useLlmJudge ? chalk.green('true') : chalk.red('false')}`);
+    console.log(`  sensitivity:   ${cfg.detection.sensitivity}`);
     console.log();
     console.log(chalk.bold('Trust Overrides:'));
     for (const [source, level] of Object.entries(cfg.trust)) {
@@ -769,6 +773,8 @@ configCmd
     if (parts[0] === 'detection') {
       if (parts[1] === 'enabled') {
         cfg.detection.enabled = value === 'true';
+      } else if (parts[1] === 'useAgentJudge') {
+        cfg.detection.useAgentJudge = value === 'true';
       } else if (parts[1] === 'useLlmJudge') {
         cfg.detection.useLlmJudge = value === 'true';
       } else if (parts[1] === 'sensitivity') {

@@ -255,9 +255,18 @@ const TRUST_THRESHOLDS: Record<TrustLevel, number> = {
 };
 ```
 
-#### Layer 3: LLM Judge
+#### Layer 3: LLM Judge / Agent Judge
 
-For borderline cases, use an LLM to evaluate:
+For borderline cases, use an LLM to evaluate. There are two modes:
+
+**External LLM Judge:** Uses OpenAI API (costs ~$0.001 per evaluation)
+
+**Agent Judge (Recommended):** The host agent evaluates borderline cases itself—no external API needed. When enabled, memfw returns an evaluation prompt that the agent processes, then applies the verdict via `--agent-response`.
+
+This allows running memfw **without any OpenAI API key**:
+- Layer 1 catches suspicious patterns
+- Agent Judge handles semantic evaluation (free, uses host agent's LLM)
+
 
 ```typescript
 const JUDGE_SYSTEM_PROMPT = `You are a security analyzer for an AI agent's memory system.
@@ -560,8 +569,18 @@ memfw audit --source moltbook
 
 # Configuration
 memfw config show
-memfw config set detection.useLlmJudge true
+memfw config set detection.useAgentJudge true   # Use Agent Judge (default)
+memfw config set detection.useLlmJudge true     # Use external LLM Judge
 memfw config set trust.moltbook hostile
+
+# Scan content (works without OpenAI API key when useAgentJudge is enabled)
+memfw scan "some content to check"
+# Output: ✓ PASS or ⚠ BORDERLINE (needs agent evaluation) or ✗ BLOCKED
+
+# For borderline cases, apply agent verdict:
+memfw scan "suspicious content" --agent-response "VERDICT: SAFE
+CONFIDENCE: 0.9
+REASONING: This is legitimate user content."
 ```
 
 ---
@@ -654,9 +673,25 @@ Make this configurable.
 
 ### LLM for Judge
 
-- Default: Use whatever model OpenClaw is already configured for
-- Fallback: Skip Layer 3 if no LLM available
+Two options for Layer 3 evaluation:
+
+**Agent Judge (default, recommended):**
+- No external API needed
+- Host agent evaluates borderline cases using its own LLM
+- memfw returns an evaluation prompt, agent provides verdict
+- Cost: Free (uses existing agent context)
+
+**External LLM Judge:**
+- Uses OpenAI API directly
 - Cost: ~$0.001 per judgment (only ~5% of memories)
+- Requires `OPENAI_API_KEY` environment variable
+
+**No-API-Key Flow:**
+When running without an OpenAI API key:
+1. Layer 1 (pattern matching) catches suspicious content
+2. Layer 2 is skipped (requires embeddings API)
+3. Agent Judge evaluates Layer 1 hits
+4. No external API calls needed
 
 ---
 
@@ -667,7 +702,8 @@ interface MemfwConfig {
   // Detection settings
   detection: {
     enabled: boolean;
-    useLlmJudge: boolean;           // Use Layer 3?
+    useAgentJudge: boolean;          // Use Agent Judge for borderline cases (no API key needed)
+    useLlmJudge: boolean;            // Use external LLM Judge (requires API key)
     llmJudgeModel?: string;          // Override model for judge
     embeddingProvider: "local" | "openai";
     sensitivity: "low" | "medium" | "high";  // Adjusts thresholds
@@ -696,7 +732,8 @@ interface MemfwConfig {
 const DEFAULT_CONFIG: MemfwConfig = {
   detection: {
     enabled: true,
-    useLlmJudge: true,
+    useAgentJudge: true,     // Default: use Agent Judge (no API key needed)
+    useLlmJudge: false,      // Default: don't use external LLM
     embeddingProvider: "local",
     sensitivity: "medium",
   },
