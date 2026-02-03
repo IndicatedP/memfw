@@ -109,7 +109,15 @@ memfw install                   # Install OpenClaw hook and SOUL.md protocol
 memfw config show                              # View all settings
 memfw config set detection.sensitivity high    # low (lenient) / medium / high (strict)
 memfw config set detection.useLlmJudge true    # Enable Layer 3 LLM analysis
+memfw config set trust.moltbook external       # Map source "moltbook" to EXTERNAL trust
 ```
+
+The sensitivity setting adjusts all trust thresholds:
+- **high**: Stricter detection (lower thresholds, more content flagged)
+- **medium**: Default balance
+- **low**: More lenient (higher thresholds, less content flagged)
+
+Trust overrides map source names to trust levels. If your scan source contains "moltbook", it will use EXTERNAL trust level.
 
 ### Library Config
 
@@ -176,6 +184,15 @@ Before writing to MEMORY.md or memory/*.md, run:
 - If ✓ PASS - proceed with write
 - If ⚠ SUSPICIOUS - run full scan for confirmation, or inform user
 ```
+
+### CLI Output States
+
+| Output | Meaning | Action |
+|--------|---------|--------|
+| ✓ PASS | Content is safe | Proceed |
+| ⚠ SUSPICIOUS | Quick scan: Layer 1 patterns matched | Run full scan |
+| ⚠ BORDERLINE | Full scan: Layer 1 flagged, Layer 2 didn't confirm | Content passed, but review recommended |
+| ✗ BLOCKED | Layer 2 or Layer 3 confirmed threat | Do not store |
 
 ## Requirements
 
