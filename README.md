@@ -125,18 +125,20 @@ Trust overrides map source names to trust levels. If your scan source contains "
 ```typescript
 const detector = new Detector({
   enableLayer2: true,           // Semantic analysis (requires OpenAI key)
-  enableLayer3: false,          // External LLM judge for borderline cases
-  useAgentJudge: true,          // Agent self-evaluates (no external API cost)
-  layer3Model: 'gpt-4o-mini',   // Model for Layer 3
+  enableLayer3: false,          // External LLM judge (requires OpenAI key)
+  useAgentJudge: true,          // Agent self-evaluates (no API key needed)
+  layer3Model: 'gpt-4o-mini',   // Model for external Layer 3
   similarityThreshold: 0.82,    // Layer 2 threshold
 });
 ```
 
-Set your OpenAI API key for Layer 2/3:
+**OpenAI API key** (optional - only needed for Layer 2 embeddings or external Layer 3):
 
 ```bash
 export OPENAI_API_KEY=your-key-here
 ```
+
+Without an API key, the tool works fully using Layer 1 (pattern matching) + Agent-as-Judge for borderline cases.
 
 ## Trust Levels
 
@@ -238,7 +240,7 @@ The `applyAgentJudgeResult()` function is also available for programmatic use.
 ## Requirements
 
 - Node.js 18+
-- OpenAI API key (optional, for Layer 2/3 semantic analysis)
+- OpenAI API key (optional - only for Layer 2 embeddings; Agent-as-Judge works without any API key)
 
 ## License
 
