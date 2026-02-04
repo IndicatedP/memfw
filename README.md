@@ -33,13 +33,13 @@ memfw detects and quarantines these attacks before they reach memory.
 ## Installation
 
 ```bash
-npm install memfw
+npm install @indicated/memfw
 ```
 
 Or install globally for CLI access:
 
 ```bash
-npm install -g memfw
+npm install -g @indicated/memfw
 ```
 
 ## Quick Start
@@ -47,7 +47,7 @@ npm install -g memfw
 ### As a Library
 
 ```typescript
-import { Detector, TrustLevel } from 'memfw';
+import { Detector, TrustLevel } from '@indicated/memfw';
 
 const detector = new Detector({ enableLayer2: true });
 await detector.initialize();
@@ -156,7 +156,7 @@ memfw integrates with OpenClaw agents via an instruction-based protocol. The age
 
 ```bash
 # Install the CLI globally
-npm install -g memfw
+npm install -g @indicated/memfw
 
 # Set up OpenClaw integration (installs hook + updates SOUL.md)
 memfw install

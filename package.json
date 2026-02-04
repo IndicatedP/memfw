@@ -1,12 +1,12 @@
 {
-  "name": "memfw",
+  "name": "@indicated/memfw",
   "version": "0.1.0",
   "description": "Memory firewall with provenance tagging and attack detection",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "memfw": "./dist/cli/index.js"
+    "memfw": "dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -27,7 +27,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/IndicatedP/memfw.git"
+    "url": "git+https://github.com/IndicatedP/memfw.git"
   },
   "files": [
     "dist",
